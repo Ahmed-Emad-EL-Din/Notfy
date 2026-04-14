@@ -40,7 +40,7 @@ function Auth({ onLogin, invitationCode }: AuthProps) {
       }
       
       if (invitationCode) {
-        // @ts-ignore
+        // @ts-expect-error adding field dinamically
         userData.invitedBy = 'admin-' + Date.now()
       }
       
@@ -61,7 +61,7 @@ function Auth({ onLogin, invitationCode }: AuthProps) {
       }
       
       if (invitationCode) {
-        // @ts-ignore
+        // @ts-expect-error adding field dinamically
         userData.invitedBy = 'admin-' + Date.now()
       }
       
