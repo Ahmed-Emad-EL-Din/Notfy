@@ -41,6 +41,20 @@ function App() {
   const [newTask, setNewTask] = useState({ title: '', description: '', dueDate: '' })
   const [newNotification, setNewNotification] = useState({ title: '', message: '', type: 'info' as const })
 
+  useEffect(() => {
+    // Automatically skip login if running locally
+    if (!currentUser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      const localUser = {
+        id: 'local-admin-debug',
+        email: 'local@dev.com',
+        name: 'Local Developer',
+        isAdmin: true
+      }
+      setCurrentUser(localUser)
+      setIsAdmin(true)
+    }
+  }, [currentUser])
+
   // Check browser notification permission
   useEffect(() => {
     if ('Notification' in window) {
