@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Bell, Calendar, Plus, User, Settings, CheckCircle, LogOut } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
+import { auth } from './lib/firebase'
 import AdminPanel from './components/AdminPanel'
 import Auth from './components/Auth'
 
@@ -73,9 +74,13 @@ function App() {
     subscribeUserToPush(user.id)
     
     // Save user to MongoDB
+    const token = await auth.currentUser?.getIdToken()
     await fetch('/.netlify/functions/api?action=upsertUser', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify({
         id: user.id,
         email: user.email,
@@ -85,7 +90,9 @@ function App() {
     })
     
     // Fetch tasks
-    const res = await fetch(`/.netlify/functions/api?action=getTasks&userId=${user.id}`)
+    const res = await fetch(`/.netlify/functions/api?action=getTasks&userId=${user.id}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
     if (res.ok) {
       const data = await res.json()
       setTasks(data.map((d: any) => ({
@@ -115,9 +122,13 @@ function App() {
         user_id: currentUser.id
       }
       
+      const token = await auth.currentUser?.getIdToken()
       const res = await fetch('/.netlify/functions/api?action=addTask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(taskObj)
       })
       
@@ -140,9 +151,13 @@ function App() {
   const toggleTaskCompletion = async (taskId: string) => {
     const task = tasks.find(t => t.id === taskId)
     if (task) {
+      const token = await auth.currentUser?.getIdToken()
       await fetch('/.netlify/functions/api?action=updateTask', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ id: taskId, completed: !task.completed })
       })
       setTasks(tasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t))

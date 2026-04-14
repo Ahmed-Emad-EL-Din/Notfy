@@ -1,5 +1,7 @@
 
 
+import { auth } from './firebase'
+
 const PUBLIC_VAPID_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || 'BAIJQyAq6v3GMBsQhs9i3No5N9l4G-aeMtj4hhP2Gie6wL8U3unjYRv0iCLSESjFRHtCp6NsJgiJ4yEzRS8VzQs'
 
 export async function subscribeUserToPush(userId: string) {
@@ -46,9 +48,13 @@ async function saveSubscriptionToDB(subscription: PushSubscription, userId: stri
   if (!subJSON.endpoint || !subJSON.keys) return
 
   try {
+    const token = await auth.currentUser?.getIdToken()
     const res = await fetch('/.netlify/functions/api?action=upsertSubscription', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify({
         user_id: userId,
         endpoint: subJSON.endpoint,
