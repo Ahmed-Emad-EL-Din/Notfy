@@ -6,10 +6,14 @@ let cachedClient: MongoClient | null = null
 
 // Initialize Firebase Admin for token verification
 // This only requires project ID if not accessing Firestore/Storage
-if (!admin.apps.length) {
-  admin.initializeApp({
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID
-  })
+if (!admin.apps.length && process.env.VITE_FIREBASE_PROJECT_ID) {
+  try {
+    admin.initializeApp({
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID
+    })
+  } catch (e) {
+    console.error("Firebase admin init error:", e)
+  }
 }
 
 async function connectToDatabase() {
@@ -24,17 +28,18 @@ async function connectToDatabase() {
 
 // Middleware to verify Firebase JWT
 async function verifyAuth(event: any) {
-  // Allow local development bypass
-  const host = event.headers.host || ''
-  if (host.includes('localhost') || host.includes('127.0.0.1')) {
-    return 'local-admin-debug'
-  }
-
   const authHeader = event.headers.authorization || event.headers.Authorization
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('Unauthorized')
   }
   const token = authHeader.split('Bearer ')[1]
+
+  // Allow local development bypass explicitly if using the dummy token AND local
+  const host = event.headers.host || ''
+  if (token === 'local-debug-token' && (host.includes('localhost') || host.includes('127.0.0.1'))) {
+    return 'local-admin-debug'
+  }
+
   try {
     const decodedToken = await admin.auth().verifyIdToken(token)
     return decodedToken.uid

@@ -48,7 +48,7 @@ async function saveSubscriptionToDB(subscription: PushSubscription, userId: stri
   if (!subJSON.endpoint || !subJSON.keys) return
 
   try {
-    const token = await auth.currentUser?.getIdToken()
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
     const res = await fetch('/.netlify/functions/api?action=upsertSubscription', {
       method: 'POST',
       headers: { 

@@ -50,8 +50,9 @@ function App() {
         name: 'Local Developer',
         isAdmin: true
       }
-      setCurrentUser(localUser)
-      setIsAdmin(true)
+      // Use handleLogin to ensure all data fetching triggers!
+      // (Ignoring the promise since it's an effect)
+      handleLogin(localUser).catch(console.error)
     }
   }, [currentUser])
 
@@ -88,7 +89,7 @@ function App() {
     subscribeUserToPush(user.id)
     
     // Save user to MongoDB
-    const token = await auth.currentUser?.getIdToken()
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
     await fetch('/.netlify/functions/api?action=upsertUser', {
       method: 'POST',
       headers: { 
@@ -136,7 +137,7 @@ function App() {
         user_id: currentUser.id
       }
       
-      const token = await auth.currentUser?.getIdToken()
+      const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
       const res = await fetch('/.netlify/functions/api?action=addTask', {
         method: 'POST',
         headers: { 
@@ -165,7 +166,7 @@ function App() {
   const toggleTaskCompletion = async (taskId: string) => {
     const task = tasks.find(t => t.id === taskId)
     if (task) {
-      const token = await auth.currentUser?.getIdToken()
+      const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
       await fetch('/.netlify/functions/api?action=updateTask', {
         method: 'PUT',
         headers: { 
