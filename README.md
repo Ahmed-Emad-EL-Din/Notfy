@@ -50,3 +50,11 @@ The app uses the browser's Notification API. Users will be prompted to allow not
 - Toggle admin mode in the admin panel
 - Send notifications to all users
 - Support for different notification types (info, warning, urgent)
+
+## Demo Admin Login
+
+For testing admin features, use these credentials on the login page:
+- **Email**: admin@notfy.com
+- **Password**: admin123
+
+Click the "Use Admin Demo Account" button on the login form to auto-fill these credentials.

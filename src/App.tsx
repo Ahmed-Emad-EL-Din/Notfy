@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react'
-import { Bell, Calendar, Plus, User, Settings, CheckCircle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Bell, Calendar, Plus, User, Settings, CheckCircle, LogOut } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
+import { subscribeUserToPush } from './lib/pushSubscription'
 import AdminPanel from './components/AdminPanel'
+import Auth from './components/Auth'
 
 interface Task {
   id: string
@@ -21,11 +23,20 @@ interface AppNotification {
   voiceNote?: string
 }
 
+interface UserData {
+  id: string
+  email: string
+  name: string
+  isAdmin: boolean
+}
+
 function App() {
+  const [currentUser, setCurrentUser] = useState<UserData | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
+  const [users] = useState<Array<{ id: string; name: string; email: string; isAdmin: boolean }>>([])
   const [newTask, setNewTask] = useState({ title: '', description: '', dueDate: '' })
   const [newNotification, setNewNotification] = useState({ title: '', message: '', type: 'info' as const })
 
@@ -38,8 +49,10 @@ function App() {
 
   // Check for tasks due tomorrow and send notifications
   useEffect(() => {
+    if (!currentUser) return
+    
     const tomorrowTasks = tasks.filter(task => 
-      !task.completed && isTomorrow(task.dueDate)
+      !task.completed && isTomorrow(task.dueDate) && task.userId === currentUser.id
     )
     
     if (tomorrowTasks.length > 0 && Notification.permission === 'granted') {
@@ -50,27 +63,90 @@ function App() {
         })
       })
     }
-  }, [tasks])
+  }, [tasks, currentUser])
 
-  const addTask = () => {
-    if (newTask.title.trim()) {
-      const task: Task = {
-        id: Date.now().toString(),
-        title: newTask.title,
-        description: newTask.description,
-        dueDate: new Date(newTask.dueDate || Date.now()),
-        completed: false,
-        userId: 'user-1'
-      }
-      setTasks([...tasks, task])
-      setNewTask({ title: '', description: '', dueDate: '' })
+  const handleLogin = async (user: UserData) => {
+    setCurrentUser(user)
+    setIsAdmin(user.isAdmin)
+    
+    // Subscribe user to push
+    subscribeUserToPush(user.id)
+    
+    // Save user to MongoDB
+    await fetch('/.netlify/functions/api?action=upsertUser', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        is_admin: user.isAdmin
+      })
+    })
+    
+    // Fetch tasks
+    const res = await fetch(`/.netlify/functions/api?action=getTasks&userId=${user.id}`)
+    if (res.ok) {
+      const data = await res.json()
+      setTasks(data.map((d: any) => ({
+        id: d._id,
+        title: d.title,
+        description: d.description,
+        dueDate: new Date(d.due_date),
+        completed: d.completed,
+        userId: d.user_id
+      })))
     }
   }
 
-  const toggleTaskCompletion = (taskId: string) => {
-    setTasks(tasks.map(task =>
-      task.id === taskId ? { ...task, completed: !task.completed } : task
-    ))
+  const handleLogout = () => {
+    setCurrentUser(null)
+    setIsAdmin(false)
+    setShowAdminPanel(false)
+  }
+
+  const addTask = async () => {
+    if (newTask.title.trim() && currentUser) {
+      const taskObj = {
+        title: newTask.title,
+        description: newTask.description,
+        due_date: new Date(newTask.dueDate || Date.now()).toISOString(),
+        completed: false,
+        user_id: currentUser.id
+      }
+      
+      const res = await fetch('/.netlify/functions/api?action=addTask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(taskObj)
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        const task: Task = {
+          id: data._id,
+          title: data.title,
+          description: data.description,
+          dueDate: new Date(data.due_date),
+          completed: data.completed,
+          userId: data.user_id
+        }
+        setTasks([...tasks, task])
+        setNewTask({ title: '', description: '', dueDate: '' })
+      }
+    }
+  }
+
+  const toggleTaskCompletion = async (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId)
+    if (task) {
+      await fetch('/.netlify/functions/api?action=updateTask', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: taskId, completed: !task.completed })
+      })
+      setTasks(tasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t))
+    }
   }
 
   const sendNotification = (notificationData: { title: string; message: string; type: 'info' | 'warning' | 'urgent' }) => {
@@ -98,6 +174,10 @@ function App() {
     }
   }
 
+  if (!currentUser) {
+    return <Auth onLogin={handleLogin} />
+  }
+
   return (
     <div className="min-h-screen bg-gray-100">
       <header className="bg-white shadow-sm border-b">
@@ -109,17 +189,26 @@ function App() {
             </div>
             
             <div className="flex items-center space-x-4">
-              <button
-                onClick={() => setShowAdminPanel(!showAdminPanel)}
-                className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-              >
-                <Settings className="h-4 w-4" />
-                <span>{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setShowAdminPanel(!showAdminPanel)}
+                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
+                </button>
+              )}
               
               <div className="flex items-center space-x-2">
                 <User className="h-6 w-6 text-gray-600" />
-                <span className="text-sm text-gray-700">User</span>
+                <span className="text-sm text-gray-700">{currentUser.name}</span>
+                <button
+                  onClick={handleLogout}
+                  className="p-1 text-gray-400 hover:text-gray-600"
+                  title="Logout"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -132,6 +221,7 @@ function App() {
             isAdmin={isAdmin}
             onToggleAdmin={() => setIsAdmin(!isAdmin)}
             onSendNotification={sendNotification}
+            users={users}
           />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -141,19 +231,21 @@ function App() {
                   <Calendar className="h-5 w-5 mr-2" />
                   My Tasks
                 </h2>
-                <span className="text-sm text-gray-500">{tasks.filter(t => !t.completed).length} pending</span>
+                <span className="text-sm text-gray-500">
+                  {tasks.filter(t => !t.completed && t.userId === currentUser.id).length} pending
+                </span>
               </div>
 
               <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                 <h3 className="text-lg font-medium mb-3">Add New Task</h3>
                 <div className="space-y-3">
-                  <input
-                    type="text"
-                    placeholder="Task title"
-                    value={newTask.title}
-                    onChange={(e) => setNewTask({...newTask, title: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                    <input
+                      type="text"
+                      placeholder="Task title"
+                      value={newTask.title}
+                      onChange={(e) => setNewTask({...newTask, title: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
                   <textarea
                     placeholder="Description (optional)"
                     value={newTask.description}
@@ -178,7 +270,9 @@ function App() {
               </div>
 
               <div className="space-y-3">
-                {tasks.map((task) => (
+                {tasks
+                  .filter(task => task.userId === currentUser.id)
+                  .map((task) => (
                   <div
                     key={task.id}
                     className={`p-4 border rounded-lg ${
@@ -211,7 +305,7 @@ function App() {
                   </div>
                 ))}
                 
-                {tasks.length === 0 && (
+                {tasks.filter(task => task.userId === currentUser.id).length === 0 && (
                   <div className="text-center py-8 text-gray-500">
                     <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
                     <p>No tasks yet. Add your first task above!</p>
