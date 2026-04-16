@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil, Link, Share2, Users } from 'lucide-react'
+import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil, Link, Users } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
 import { auth } from './lib/firebase'
