@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil } from 'lucide-react'
+import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil, Link, Share2 } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
 import { auth } from './lib/firebase'
@@ -60,6 +60,7 @@ function App() {
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [activeTab, setActiveTab] = useState<'tasks' | 'notifications'>('tasks')
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [isGeneratingInvite, setIsGeneratingInvite] = useState(false)
 
   const processingLogins = useRef(new Set<string>())
 
@@ -542,6 +543,33 @@ function App() {
   }
 
   // Show a loading screen while Firebase checks for an existing session
+  const handleGenerateInvite = async () => {
+    setIsGeneratingInvite(true)
+    try {
+      const fbToken = await auth.currentUser?.getIdToken() || 'local-debug-token'
+      const res = await fetch('/.netlify/functions/api?action=generateInvite', {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${fbToken}`
+        },
+        body: JSON.stringify({ role: 'user' })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const link = `${window.location.origin}/invite/${data.token}`
+        await navigator.clipboard.writeText(link)
+        alert('Workspace Invite Link copied to clipboard!')
+      } else {
+        alert("Failed to generate invite.")
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setIsGeneratingInvite(false)
+    }
+  }
+
   if (isInitializing) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
@@ -598,14 +626,26 @@ function App() {
             
             <div className="flex items-center space-x-4">
               {isAdmin && (
-                <button
-                  onClick={() => setShowAdminPanel(!showAdminPanel)}
-                  className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition text-sm sm:text-base"
-                >
-                  <Settings className="h-4 w-4" />
-                  <span className="hidden sm:inline">{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
-                  <span className="sm:hidden">{showAdminPanel ? 'User' : 'Admin'}</span>
-                </button>
+                <>
+                  <button
+                    onClick={handleGenerateInvite}
+                    disabled={isGeneratingInvite}
+                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 transition text-sm sm:text-base disabled:opacity-50"
+                    title="Copy Invite Link"
+                  >
+                    <Link className="h-4 w-4" />
+                    <span className="hidden sm:inline">{isGeneratingInvite ? 'Generating...' : 'Invite Users'}</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => setShowAdminPanel(!showAdminPanel)}
+                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition text-sm sm:text-base"
+                  >
+                    <Settings className="h-4 w-4" />
+                    <span className="hidden sm:inline">{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
+                    <span className="sm:hidden">{showAdminPanel ? 'User' : 'Admin'}</span>
+                  </button>
+                </>
               )}
               
               <div className="relative">
@@ -847,23 +887,34 @@ function App() {
                             >
                                 {mutedTasks.includes(task.id) ? "🔕" : "🔔"}
                             </button>
+                            
+                            {isAdmin && (task.userId === currentUser.id) && (
+                               <button
+                                 onClick={() => handleGenerateInvite()}
+                                 className="text-gray-400 hover:text-indigo-600 transition-colors p-1.5 rounded-md hover:bg-indigo-50"
+                                 title="Copy Invite Link to share"
+                               >
+                                 <Link className="h-5 w-5" />
+                               </button>
+                            )}
+
                             {(task.userId === currentUser.id || isAdmin) && (
-                              <button
-                                onClick={() => handleEditTask(task)}
-                                className="text-gray-400 hover:text-blue-500 transition-colors p-1"
-                                title="Edit task"
-                              >
-                                <Pencil className="h-5 w-5" />
-                              </button>
+                               <button
+                                 onClick={() => handleEditTask(task)}
+                                 className="text-gray-400 hover:text-blue-500 transition-colors p-1.5 rounded-md hover:bg-blue-50"
+                                 title="Edit task"
+                               >
+                                 <Pencil className="h-5 w-5" />
+                               </button>
                             )}
                             {(task.userId === currentUser.id || isAdmin) && (
-                              <button
-                                onClick={() => handleDeleteTask(task.id)}
-                                className="text-gray-400 hover:text-red-500 transition-colors p-1"
-                                title="Delete task"
-                              >
-                                <Trash2 className="h-5 w-5" />
-                              </button>
+                               <button
+                                 onClick={() => handleDeleteTask(task.id)}
+                                 className="text-gray-400 hover:text-red-500 transition-colors p-1.5 rounded-md hover:bg-red-50"
+                                 title="Delete task"
+                               >
+                                 <Trash2 className="h-5 w-5" />
+                               </button>
                             )}
                           </div>
                         </div>
