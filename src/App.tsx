@@ -441,8 +441,15 @@ function App() {
           setTasks(newList)
       }
     } else {
-        const errData = await res.json().catch(() => ({}));
-        alert(`Failed to save task. Server Error: ${errData.error || res.statusText || 'Unknown'}`);
+        const text = await res.text().catch(() => '');
+        let errorMsg = 'Unknown';
+        try {
+            const errData = JSON.parse(text);
+            errorMsg = errData.error || res.statusText || 'Unknown';
+        } catch (e) {
+            errorMsg = `Server Response (${res.status}): ${text.substring(0, 100)}`;
+        }
+        alert(`Failed to save task. ${errorMsg}`);
     }
   }
 
