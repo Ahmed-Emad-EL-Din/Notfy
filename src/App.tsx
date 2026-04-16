@@ -363,6 +363,8 @@ function App() {
   const toggleTaskCompletion = async (taskId: string) => {
     const task = tasks.find(t => t.id === taskId)
     if (task) {
+      if (!isAdmin && task.userId !== currentUser?.id) return
+
       const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
       await fetch('/.netlify/functions/api?action=updateTask', {
         method: 'PUT',
@@ -373,6 +375,25 @@ function App() {
         body: JSON.stringify({ id: taskId, completed: !task.completed })
       })
       setTasks(tasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t))
+    }
+  }
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!currentUser) return
+    if (!confirm("Are you sure you want to delete this task?")) return
+
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=deleteTask', {
+      method: 'DELETE',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ id: taskId })
+    })
+
+    if (res.ok) {
+      setTasks(tasks.filter(t => t.id !== taskId))
     }
   }
 
@@ -495,20 +516,22 @@ function App() {
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center space-x-3">
-                          <button
-                            onClick={() => toggleTaskCompletion(task.id)}
-                            className={`p-1 rounded-full transition-colors ${
-                              task.completed ? 'text-green-500 bg-green-100' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'
-                            }`}
-                          >
-                            <CheckCircle className="h-6 w-6" />
-                          </button>
-                          <h3 className={`text-lg font-medium ${task.completed ? 'text-green-800 line-through' : 'text-gray-900'}`}>
-                            {task.title}
-                            {task.userId !== currentUser.id && (
-                                <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">From Admin</span>
-                            )}
-                          </h3>
+                           {(task.userId === currentUser.id || isAdmin) && (
+                             <button
+                               onClick={() => toggleTaskCompletion(task.id)}
+                               className={`p-1 rounded-full transition-colors ${
+                                 task.completed ? 'text-green-500 bg-green-100' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'
+                               }`}
+                             >
+                               <CheckCircle className="h-6 w-6" />
+                             </button>
+                           )}
+                           <h3 className={`text-lg font-medium ${task.completed ? 'text-green-800 line-through' : 'text-gray-900'}`}>
+                             {task.title}
+                             {task.userId !== currentUser.id && (
+                                 <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">From Admin</span>
+                             )}
+                           </h3>
                         </div>
                         {task.description_html && (
                           <div 
@@ -516,9 +539,20 @@ function App() {
                              dangerouslySetInnerHTML={{__html: task.description_html}}
                           />
                         )}
-                        <p className="text-xs text-gray-500 mt-4 ml-11 font-medium bg-gray-100 inline-block px-2 py-1 rounded-md">
-                          Due: {format(task.dueDate, 'MMM dd, yyyy HH:mm')}
-                        </p>
+                        <div className="flex items-center justify-between mt-4 ml-11">
+                          <p className="text-xs text-gray-500 font-medium bg-gray-100 inline-block px-2 py-1 rounded-md">
+                            Due: {format(task.dueDate, 'MMM dd, yyyy HH:mm')}
+                          </p>
+                          {(task.userId === currentUser.id || isAdmin) && (
+                            <button
+                              onClick={() => handleDeleteTask(task.id)}
+                              className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                              title="Delete task"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

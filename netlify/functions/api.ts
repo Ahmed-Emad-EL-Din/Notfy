@@ -92,6 +92,13 @@ export const handler = async (event: any, context: any) => {
       }
     }
 
+    // Fetch user info to check admin status
+    let userRecord = null;
+    if (uid) {
+       userRecord = await db.collection('users').findOne({ id: uid });
+    }
+    const userIsAdmin = userRecord?.is_admin === true || uid === 'local-admin-debug';
+
     if (action === 'upsertUser' && event.httpMethod === 'POST') {
       const { id, email, name, is_admin } = body
       if (!uid || id !== uid) throw new Error('Unauthorized')
@@ -140,8 +147,8 @@ export const handler = async (event: any, context: any) => {
       const existingTask = await db.collection('tasks').findOne({ _id: id })
       if (!existingTask) throw new Error('Task not found')
       
-      // Task owners and admins who created it can edit
-      if (existingTask.user_id !== uid) throw new Error('Unauthorized')
+      // Task owners AND admins can edit
+      if (existingTask.user_id !== uid && !userIsAdmin) throw new Error('Unauthorized')
 
       await db.collection('tasks').updateOne({ _id: id }, { $set: updates })
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
@@ -150,7 +157,10 @@ export const handler = async (event: any, context: any) => {
     if (action === 'deleteTask' && event.httpMethod === 'DELETE') {
       const { id } = body
       const existingTask = await db.collection('tasks').findOne({ _id: id })
-      if (!existingTask || existingTask.user_id !== uid) throw new Error('Unauthorized')
+      if (!existingTask) throw new Error('Task not found')
+      
+      // Task owners AND admins can delete
+      if (existingTask.user_id !== uid && !userIsAdmin) throw new Error('Unauthorized')
 
       await db.collection('tasks').deleteOne({ _id: id })
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
