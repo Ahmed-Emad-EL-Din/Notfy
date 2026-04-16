@@ -1,5 +1,6 @@
 import { MongoClient, ObjectId } from 'mongodb'
 import * as admin from 'firebase-admin'
+import webpush from 'web-push'
 
 const uri = process.env.VITE_MONGODB_URI
 let cachedClient: MongoClient | null = null
@@ -50,6 +51,60 @@ const initializeFirebase = () => {
     console.log("Firebase Admin initialized successfully.");
   } catch (e: any) {
     throw new Error(`Firebase Admin Initialization Failed: ${e.message}`);
+  }
+}
+
+// Config web-push
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT,
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  )
+}
+
+async function sendAlertsToLinkedUsers(db: any, task: any, adminId: string) {
+  try {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const links = await db.collection('user_links').find({ admin_id: adminId, active: true, notifications_enabled: true }).toArray()
+    const targetUserIds = links.map((l: any) => l.user_id)
+    
+    if (targetUserIds.length === 0) return;
+
+    const usersToNotify = await db.collection('users').find({ id: { $in: targetUserIds } }).toArray()
+    const subscriptions = await db.collection('push_subscriptions').find({ user_id: { $in: targetUserIds } }).toArray()
+
+    // 1. Telegram Notifications
+    if (botToken) {
+      for (const u of usersToNotify) {
+        if (u.telegram_chat_id) {
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: u.telegram_chat_id,
+              text: `📢 NEW GLOBAL TASK: ${task.title}\n\n${task.description_html ? 'Check details in the app!' : ''}\nDue: ${new Date(task.due_date).toLocaleString()}`
+            })
+          }).catch(err => console.error("Telegram error:", err))
+        }
+      }
+    }
+
+    // 2. Web Push Notifications
+    for (const sub of subscriptions) {
+      const pushSub = { endpoint: sub.endpoint, keys: sub.keys }
+      const payload = JSON.stringify({
+        title: 'New Global Task',
+        body: `Admin posted: ${task.title}`,
+        data: { url: '/' }
+      })
+      webpush.sendNotification(pushSub, payload).catch(err => {
+        if (err.statusCode === 410) db.collection('push_subscriptions').deleteOne({ _id: sub._id })
+        console.error("Web Push Error:", err)
+      })
+    }
+  } catch (err) {
+    console.error("sendAlertsToLinkedUsers error:", err)
   }
 }
 
@@ -175,6 +230,12 @@ export const handler = async (event: any, context: any) => {
       }
       const result = await db.collection('tasks').insertOne(doc)
       const task = await db.collection('tasks').findOne({ _id: result.insertedId })
+      
+      // Instant Push for Global Tasks
+      if (task.visibility === 'global' && uid) {
+          await sendAlertsToLinkedUsers(db, task, uid);
+      }
+
       return { statusCode: 200, headers, body: JSON.stringify({ ...task, _id: result.insertedId.toString() }) }
     }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil, Link, Share2 } from 'lucide-react'
+import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil, Link, Share2, Users } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
 import { auth } from './lib/firebase'
@@ -627,6 +627,11 @@ function App() {
             <div className="flex items-center space-x-4">
               {isAdmin && (
                 <>
+                  <div className="hidden md:flex items-center space-x-1.5 px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-gray-600 text-sm font-semibold">
+                    <Users className="h-4 w-4 text-blue-500" />
+                    <span>{users.length} Followers</span>
+                  </div>
+
                   <button
                     onClick={handleGenerateInvite}
                     disabled={isGeneratingInvite}
