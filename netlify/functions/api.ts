@@ -54,8 +54,8 @@ async function verifyAuth(event: any) {
   try {
     const decodedToken = await admin.auth().verifyIdToken(token)
     return decodedToken.uid
-  } catch (error) {
-    throw new Error('Unauthorized: Invalid token')
+  } catch (error: any) {
+    throw new Error('Unauthorized: ' + (error.message || 'Invalid token'))
   }
 }
 
