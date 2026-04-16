@@ -788,7 +788,7 @@ function App() {
                         )}
                         
                         <div className="ml-11 flex items-center space-x-2 mt-4 flex-wrap gap-y-2">
-                            {['👍', '❤️', '👀', '🔥'].map(emoji => {
+                            {['👍', '❤️', '👀', '🔥', '😢'].map(emoji => {
                                 const reacted = task.reactions && task.reactions[emoji] && task.reactions[emoji].includes(currentUser.id);
                                 const count = task.reactions && task.reactions[emoji] ? task.reactions[emoji].length : 0;
                                 return (
