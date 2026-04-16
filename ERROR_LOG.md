@@ -1,12 +1,11 @@
-## 8. Android Browser Login Loop (Ultimate Fix)
+## 8. Android Browser Login Loop (The FIRST-PARTY PROXY Fix)
 **Symptoms:** 
-- Users on Android Chrome experience a loop where they login successfully but are flickered back to the login screen.
+- Users on Android Chrome experience a persistent login loop despite session management fixes.
 **Root Cause:** 
-- `onAuthStateChanged` fires once with `null` on startup before the redirect results are processed. This caused the UI to prematurely hide the loading screen and show the Login form, which then interrupted the SDK's internal logic.
+- **Storage Partitioning**: Chrome on Android blocks "Third-Party Cookies". Since the app was on `netlify.app` and auth was on `firebaseapp.com`, the browser partitioned the auth state, making it invisible to the app upon return.
 **Solution:** 
-- **Redirect Flagging**: Implemented a `relaysignal_redirect_pending` flag in `localStorage` that is set the moment "Continue with Google" is clicked.
-- **Defensive Loading**: Updated `App.tsx` to check this flag. If set, the app **stays on the loading screen** for up to 8 seconds, giving the `Auth` component enough time to finish the redirect flow.
-- **Result**: The "Flicker" is eliminated, and the user remains on the loading screen until the Dashboard is ready.
+- **Netlify Proxy**: Created `public/_redirects` to proxy `/__/auth/` internally.
+- **AuthDomain Masking**: Updated `firebase.ts` to use `relaysignal.netlify.app` as the `authDomain`. This forces the browser to treat the auth process as "First-Party", bypassing the security blocks entirely.
 
 ## 9. Telegram Connection Timeout
 **Symptoms:** 
