@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Mail, Lock, User, LogIn, AlertCircle } from 'lucide-react'
 import { auth } from '../lib/firebase'
 import { 
-  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider, 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -24,6 +25,23 @@ function Auth({ onLogin }: AuthProps) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [verificationSent, setVerificationSent] = useState(false)
+
+  // Handle the redirect result when the user returns from Google sign-in
+  useEffect(() => {
+    setLoading(true)
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result) {
+          await handleAuthResult(result)
+        }
+      })
+      .catch((err) => {
+        if (err.code !== 'auth/popup-closed-by-user') {
+          setError(err.message || 'Google sign-in failed')
+        }
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   const handleAuthResult = async (userCredential: any) => {
     const user = userCredential.user
@@ -74,17 +92,14 @@ function Auth({ onLogin }: AuthProps) {
     if (!auth) return setError("Firebase configuration missing.")
     setError(null)
     setLoading(true)
-    
     try {
       const provider = new GoogleAuthProvider()
-      const result = await signInWithPopup(auth, provider)
-      await handleAuthResult(result)
+      // Use redirect instead of popup — works on all browsers without popup blocker issues
+      await signInWithRedirect(auth, provider)
+      // Page will redirect to Google and come back. Result handled in useEffect above.
     } catch (err: any) {
       console.error(err)
-      if (err.code !== 'auth/popup-closed-by-user') {
-        setError(err.message || 'Google Auth failed')
-      }
-    } finally {
+      setError(err.message || 'Google Auth failed')
       setLoading(false)
     }
   }
