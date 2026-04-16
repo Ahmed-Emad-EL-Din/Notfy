@@ -5,12 +5,23 @@ const uri = process.env.VITE_MONGODB_URI
 let cachedClient: MongoClient | null = null
 
 // Initialize Firebase Admin for token verification
-// This only requires project ID if not accessing Firestore/Storage
-if (!admin.apps.length && process.env.VITE_FIREBASE_PROJECT_ID) {
+if (!admin.apps.length) {
+  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID
+
   try {
-    admin.initializeApp({
-      projectId: process.env.VITE_FIREBASE_PROJECT_ID
-    })
+    if (serviceAccount) {
+      // Full service account JSON provided in Netlify
+      const cert = JSON.parse(serviceAccount)
+      admin.initializeApp({
+        credential: admin.credential.cert(cert)
+      })
+    } else if (projectId) {
+      // Fallback for local dev if only project ID is set
+      admin.initializeApp({
+        projectId: projectId
+      })
+    }
   } catch (e) {
     console.error("Firebase admin init error:", e)
   }
