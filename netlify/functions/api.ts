@@ -51,11 +51,10 @@ async function connectToDatabase() {
 async function verifyAuth(event: any) {
   const authHeader = event.headers.authorization || event.headers.Authorization
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw new Error('Unauthorized')
+    throw new Error('Unauthorized: Missing Auth Header')
   }
   const token = authHeader.split('Bearer ')[1]
 
-  // Allow local development bypass explicitly if using the dummy token AND local
   const host = event.headers.host || ''
   if (token === 'local-debug-token' && (host.includes('localhost') || host.includes('127.0.0.1'))) {
     return 'local-admin-debug'
@@ -65,7 +64,9 @@ async function verifyAuth(event: any) {
     const decodedToken = await admin.auth().verifyIdToken(token)
     return decodedToken.uid
   } catch (error: any) {
-    throw new Error('Unauthorized: ' + (error.message || 'Invalid token'))
+    console.error("Firebase verifyIdToken error:", error.code, error.message);
+    // Explicitly returning the code helps identify if it's a project mismatch vs expiry
+    throw new Error(`Unauthorized: [${error.code || 'unknown'}] ${error.message || 'Invalid token'}`)
   }
 }
 
