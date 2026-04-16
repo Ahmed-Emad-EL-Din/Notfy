@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Users, BellPlus, BarChart3 } from 'lucide-react'
+import { Users, BellPlus, BarChart3, Link } from 'lucide-react'
+import { auth } from '../lib/firebase'
 
 interface AdminPanelProps {
   isAdmin: boolean
@@ -20,7 +21,7 @@ function AdminPanel({ isAdmin, onToggleAdmin, onSendNotification, users }: Admin
 
   const [invitationLink, setInvitationLink] = useState('')
   const [showInvitationDialog, setShowInvitationDialog] = useState(false)
-  const [invitationType, setInvitationType] = useState<'user' | 'admin'>('user')
+  const [isGenerating, setIsGenerating] = useState(false)
 
   const handleSendNotification = () => {
     if (newNotification.title.trim() && newNotification.message.trim()) {
@@ -41,11 +42,29 @@ function AdminPanel({ isAdmin, onToggleAdmin, onSendNotification, users }: Admin
     }
   }
 
-  const generateInvitationLink = () => {
-    const baseUrl = window.location.origin
-    const code = `${invitationType}-invite-${Date.now()}`
-    const link = `${baseUrl}/?invite=${code}`
-    setInvitationLink(link)
+  const generateInvitationLink = async () => {
+    setIsGenerating(true)
+    try {
+      const fbToken = await auth.currentUser?.getIdToken() || 'local-debug-token'
+      const res = await fetch('/.netlify/functions/api?action=generateInvite', {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${fbToken}`
+        }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const baseUrl = window.location.origin
+        const link = `${baseUrl}/invite/${data.token}`
+        setInvitationLink(link)
+      } else {
+        alert("Failed to generate invite.")
+      }
+    } catch (e) {
+      console.error(e)
+    }
+    setIsGenerating(false)
   }
 
   const copyInvitationLink = async () => {
@@ -76,75 +95,127 @@ function AdminPanel({ isAdmin, onToggleAdmin, onSendNotification, users }: Admin
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-          <BarChart3 className="h-5 w-5 mr-2" />
-          Admin Panel
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+      <div className="flex items-center justify-between mb-8 pb-4 border-b">
+        <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+          <BarChart3 className="h-6 w-6 mr-3 text-blue-600" />
+          Admin Dashboard
         </h2>
         <button
           onClick={onToggleAdmin}
-          className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+          className="px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-md hover:bg-gray-200 transition"
         >
-          Switch to User Mode
+          Switch to User Workspace
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Notification Management */}
-        <div className="bg-blue-50 rounded-lg p-4">
-          <h3 className="text-lg font-medium mb-3 flex items-center">
-            <BellPlus className="h-5 w-5 mr-2" />
-            Send Notification
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        
+        {/* Statistics & Users */}
+        <div className="space-y-8">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-100">
+              <h3 className="text-lg font-semibold text-blue-900 mb-4 flex items-center">
+                <Users className="h-5 w-5 mr-2" />
+                Linked Users Directory
+              </h3>
+              
+              <div className="space-y-2 mb-4">
+                <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
+                  <span className="text-gray-600 font-medium">Total Linked Users</span>
+                  <span className="font-bold text-lg text-blue-700">{users.length}</span>
+                </div>
+              </div>
+
+              <div className="scroll-py-2 max-h-60 overflow-y-auto pr-2 space-y-2">
+                {users.map(user => (
+                  <div key={user.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100 shadow-sm hover:border-blue-200 transition">
+                    <div>
+                      <div className="font-semibold text-gray-800">{user.name}</div>
+                      <div className="text-xs text-gray-500">{user.email}</div>
+                    </div>
+                  </div>
+                ))}
+                
+                {users.length === 0 && (
+                  <div className="text-center text-gray-500 py-6 bg-white rounded-lg border border-dashed border-gray-300">
+                    <p>No users linked yet.</p>
+                    <p className="text-xs mt-1">Generate an invite link to onboard users.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Quick Actions</h3>
+              <div className="space-y-3">
+                <button 
+                  onClick={() => setShowInvitationDialog(true)}
+                  className="w-full flex justify-center items-center px-4 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                >
+                  <Link className="h-4 w-4 mr-2" />
+                  Generate Workspace Invite Link
+                </button>
+              </div>
+            </div>
+        </div>
+
+        {/* Notifications */}
+        <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-semibold text-gray-800 mb-5 flex items-center">
+            <BellPlus className="h-5 w-5 mr-2 text-yellow-500" />
+            Send Custom Notification
           </h3>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <input
               type="text"
-              placeholder="Notification title"
+              placeholder="Notification Title"
               value={newNotification.title}
               onChange={(e) => setNewNotification({...newNotification, title: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <textarea
-              placeholder="Message content"
+              placeholder="Provide a detailed message..."
               value={newNotification.message}
               onChange={(e) => setNewNotification({...newNotification, message: e.target.value})}
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <select
-              value={newNotification.type}
-              onChange={(e) => setNewNotification({...newNotification, type: e.target.value as any})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="info">Info</option>
-              <option value="warning">Warning</option>
-              <option value="urgent">Urgent</option>
-            </select>
-            <input
-              type="datetime-local"
-              placeholder="Schedule time (optional)"
-              value={newNotification.scheduledTime}
-              onChange={(e) => setNewNotification({...newNotification, scheduledTime: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={4}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             
-            <div className="space-y-2">
-              <label className="flex items-center">
+            <div className="grid grid-cols-2 gap-4">
+                <select
+                  value={newNotification.type}
+                  onChange={(e) => setNewNotification({...newNotification, type: e.target.value as any})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="info">Info Priority</option>
+                  <option value="warning">Warning Priority</option>
+                  <option value="urgent">Urgent Priority</option>
+                </select>
+                <input
+                  type="datetime-local"
+                  title="Schedule Time"
+                  value={newNotification.scheduledTime}
+                  onChange={(e) => setNewNotification({...newNotification, scheduledTime: e.target.value})}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+            </div>
+            
+            <div className="bg-gray-50 p-4 rounded-lg mt-2 border border-gray-100">
+              <label className="flex items-center text-gray-800 font-medium mb-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={newNotification.isBroadcast}
                   onChange={(e) => setNewNotification({...newNotification, isBroadcast: e.target.checked, targetUserIds: []})}
-                  className="mr-2"
+                  className="mr-3 h-4 w-4 text-blue-600 rounded"
                 />
-                Send to all users
+                Broadcast to all linked users
               </label>
               
               {!newNotification.isBroadcast && (
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium">Select users:</label>
+                <div className="space-y-2 mt-4 max-h-40 overflow-y-auto">
+                  <p className="text-sm font-medium text-gray-600 mb-2">Select recipients:</p>
                   {users.filter(user => !user.isAdmin).map(user => (
-                    <label key={user.id} className="flex items-center">
+                    <label key={user.id} className="flex items-center text-sm cursor-pointer hover:bg-gray-100 p-1.5 rounded">
                       <input
                         type="checkbox"
                         checked={newNotification.targetUserIds.includes(user.id)}
@@ -154,149 +225,75 @@ function AdminPanel({ isAdmin, onToggleAdmin, onSendNotification, users }: Admin
                             : newNotification.targetUserIds.filter(id => id !== user.id)
                           setNewNotification({...newNotification, targetUserIds: updatedIds})
                         }}
-                        className="mr-2"
+                        className="mr-3 h-4 w-4"
                       />
-                      {user.name} ({user.email})
+                      {user.name}
                     </label>
                   ))}
                 </div>
               )}
             </div>
+            
             <button
               onClick={handleSendNotification}
-              className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              className="w-full mt-4 px-4 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition shadow-sm"
             >
-              Send Notification
+              Dispatch Notification
             </button>
           </div>
         </div>
 
-        {/* Statistics */}
-        <div className="bg-green-50 rounded-lg p-4">
-          <h3 className="text-lg font-medium mb-3 flex items-center">
-            <BarChart3 className="h-5 w-5 mr-2" />
-            System Statistics
-          </h3>
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Total Users:</span>
-              <span className="font-semibold">{users.length}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Administrators:</span>
-              <span className="font-semibold">{users.filter(u => u.isAdmin).length}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">Regular Users:</span>
-              <span className="font-semibold">{users.filter(u => !u.isAdmin).length}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">System Status:</span>
-              <span className="font-semibold text-green-600">Online</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="bg-yellow-50 rounded-lg p-4">
-          <h3 className="text-lg font-medium mb-3">Quick Actions</h3>
-          <div className="space-y-2">
-            <button 
-              onClick={() => setShowInvitationDialog(true)}
-              className="w-full px-3 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-            >
-              Generate Invitation Link
-            </button>
-            <button className="w-full px-3 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600">
-              Send Test Notification
-            </button>
-            <button className="w-full px-3 py-2 bg-red-500 text-white rounded-md hover:bg-red-600">
-              Clear All Notifications
-            </button>
-          </div>
-        </div>
-
-        {/* User Management */}
-        <div className="bg-purple-50 rounded-lg p-4">
-          <h3 className="text-lg font-medium mb-3">User Management</h3>
-          <div className="space-y-3 max-h-40 overflow-y-auto">
-            {users.map(user => (
-              <div key={user.id} className="flex items-center justify-between p-2 bg-white rounded border">
-                <div>
-                  <div className="font-medium">{user.name}</div>
-                  <div className="text-sm text-gray-600">{user.email}</div>
-                </div>
-                <span className={`px-2 py-1 text-xs rounded ${
-                  user.isAdmin ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'
-                }`}>
-                  {user.isAdmin ? 'Admin' : 'User'}
-                </span>
-              </div>
-            ))}
-            
-            {users.length === 0 && (
-              <div className="text-center text-gray-500 py-4">
-                No users registered yet
-              </div>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Invitation Dialog */}
       {showInvitationDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-medium mb-4">Generate Invitation Link</h3>
+        <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 transform transition-all">
+            <h3 className="text-xl font-bold text-gray-900 mb-6">Generate Secure Invite</h3>
             
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Invitation Type:</label>
-                <select
-                  value={invitationType}
-                  onChange={(e) => setInvitationType(e.target.value as 'user' | 'admin')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                >
-                  <option value="user">Regular User</option>
-                  <option value="admin">Administrator</option>
-                </select>
-              </div>
-              
+            <div className="space-y-5">
               <button
                 onClick={generateInvitationLink}
-                className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                disabled={isGenerating}
+                className={`w-full px-4 py-3 font-medium text-white rounded-lg transition ${
+                    isGenerating ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
               >
-                Generate Link
+                {isGenerating ? 'Generating...' : 'Create Link'}
               </button>
               
               {invitationLink && (
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium">Invitation Link:</label>
+                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                  <label className="block text-sm font-semibold text-green-800 mb-2">Your Invite Link:</label>
                   <div className="flex space-x-2">
                     <input
                       type="text"
                       value={invitationLink}
                       readOnly
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      className="flex-1 px-3 py-2 bg-white border border-green-300 rounded-md text-sm cursor-text focus:outline-none"
+                      onClick={(e) => e.currentTarget.select()}
                     />
                     <button
                       onClick={copyInvitationLink}
-                      className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                      className="px-4 py-2 bg-green-600 font-medium text-white rounded-md hover:bg-green-700 transition"
                     >
                       Copy
                     </button>
                   </div>
-                  <p className="text-xs text-gray-600">
-                    Share this link with users to invite them to join Notfy
+                  <p className="text-xs text-green-700 mt-3 font-medium italic">
+                    Share this unique link with users to link them to your workspace.
                   </p>
                 </div>
               )}
               
               <button
-                onClick={() => setShowInvitationDialog(false)}
-                className="w-full px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+                onClick={() => {
+                    setShowInvitationDialog(false)
+                    setInvitationLink('')
+                }}
+                className="w-full px-4 py-3 text-gray-600 font-medium bg-gray-100 rounded-lg hover:bg-gray-200 transition"
               >
-                Close
+                Done
               </button>
             </div>
           </div>

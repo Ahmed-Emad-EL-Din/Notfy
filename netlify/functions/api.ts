@@ -53,7 +53,7 @@ export const handler = async (event: any, context: any) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS'
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
   }
 
   if (event.httpMethod === 'OPTIONS') {
@@ -78,7 +78,6 @@ export const handler = async (event: any, context: any) => {
 
     if (action === 'upsertUser' && event.httpMethod === 'POST') {
       const { id, email, name, is_admin } = body
-      // Ensure user can only upsert their own record
       if (id !== uid) throw new Error('Unauthorized')
       
       await db.collection('users').updateOne(
@@ -93,38 +92,110 @@ export const handler = async (event: any, context: any) => {
       const { userId } = event.queryStringParameters || {}
       if (userId !== uid) throw new Error('Unauthorized')
       
-      const tasks = await db.collection('tasks').find({ user_id: userId }).toArray()
+      // Get linked admins for this user
+      const userLinks = await db.collection('user_links').find({ user_id: uid, active: true }).toArray()
+      const adminIds = userLinks.map(link => link.admin_id)
+
+      // Get user's personal tasks OR tasks made by linked admins that are global
+      const tasks = await db.collection('tasks').find({
+        $or: [
+          { user_id: uid },
+          { user_id: { $in: adminIds }, visibility: 'global' }
+        ]
+      }).sort({ created_at: -1 }).toArray()
+      
       return { statusCode: 200, headers, body: JSON.stringify(tasks) }
     }
 
     if (action === 'addTask' && event.httpMethod === 'POST') {
       if (body.user_id !== uid) throw new Error('Unauthorized')
       
-      const result = await db.collection('tasks').insertOne({
+      const doc = {
         ...body,
-        _id: new ObjectId().toString()
-      })
+        _id: new ObjectId().toString(),
+        created_at: new Date().toISOString()
+      }
+      const result = await db.collection('tasks').insertOne(doc)
       const task = await db.collection('tasks').findOne({ _id: result.insertedId })
       return { statusCode: 200, headers, body: JSON.stringify(task) }
     }
 
     if (action === 'updateTask' && event.httpMethod === 'PUT') {
-      const { id, completed } = body
-      // Need to verify task belongs to user
+      const { id, ...updates } = body
+      const existingTask = await db.collection('tasks').findOne({ _id: id })
+      if (!existingTask) throw new Error('Task not found')
+      
+      // Task owners and admins who created it can edit
+      if (existingTask.user_id !== uid) throw new Error('Unauthorized')
+
+      await db.collection('tasks').updateOne({ _id: id }, { $set: updates })
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
+    if (action === 'deleteTask' && event.httpMethod === 'DELETE') {
+      const { id } = body
       const existingTask = await db.collection('tasks').findOne({ _id: id })
       if (!existingTask || existingTask.user_id !== uid) throw new Error('Unauthorized')
 
-      await db.collection('tasks').updateOne({ _id: id }, { $set: { completed } })
+      await db.collection('tasks').deleteOne({ _id: id })
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
+    // Admin & Links
+    if (action === 'getLinkedUsers' && event.httpMethod === 'GET') {
+      const links = await db.collection('user_links').find({ admin_id: uid, active: true }).toArray()
+      const userIds = links.map(l => l.user_id)
+      const users = await db.collection('users').find({ id: { $in: userIds } }).toArray()
+      
+      return { statusCode: 200, headers, body: JSON.stringify(users) }
+    }
+
+    if (action === 'generateInvite' && event.httpMethod === 'POST') {
+      // Create a unique invite link for an admin
+      const token = new ObjectId().toString()
+      await db.collection('invites').insertOne({
+        admin_id: uid,
+        token: token,
+        created_at: new Date()
+      })
+      return { statusCode: 200, headers, body: JSON.stringify({ token }) }
+    }
+
+    if (action === 'joinAdmin' && event.httpMethod === 'POST') {
+      const { token } = body
+      const invite = await db.collection('invites').findOne({ token })
+      if (!invite) throw new Error('Invalid invite link')
+      
+      await db.collection('user_links').updateOne(
+        { user_id: uid, admin_id: invite.admin_id },
+        { $set: { user_id: uid, admin_id: invite.admin_id, active: true, notifications_enabled: true } },
+        { upsert: true }
+      )
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
+    if (action === 'deleteAccount' && event.httpMethod === 'DELETE') {
+      // Remove all data associated with user
+      await db.collection('users').deleteOne({ id: uid })
+      await db.collection('tasks').deleteMany({ user_id: uid })
+      await db.collection('user_links').deleteMany({ user_id: uid })
+      await db.collection('push_subscriptions').deleteMany({ user_id: uid })
+      // Optionally remove from firebase auth directly if using Admin SDK for auth
+      try {
+        await admin.auth().deleteUser(uid)
+      } catch (err) {
+        console.error("Firebase auth deletion failed:", err)
+      }
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
     }
 
     if (action === 'upsertSubscription' && event.httpMethod === 'POST') {
-      const { user_id, endpoint, p256dh, auth } = body
+      const { user_id, endpoint, keys } = body
       if (user_id !== uid) throw new Error('Unauthorized')
 
       await db.collection('push_subscriptions').updateOne(
         { endpoint },
-        { $set: { user_id, endpoint, p256dh, auth, updated_at: new Date() } },
+        { $set: { user_id, endpoint, keys, updated_at: new Date() } },
         { upsert: true }
       )
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }

@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react'
-import { Bell, Calendar, Plus, User, Settings, CheckCircle, LogOut } from 'lucide-react'
+import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2 } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
 import { auth } from './lib/firebase'
 import AdminPanel from './components/AdminPanel'
 import Auth from './components/Auth'
+import TaskEditor from './components/TaskEditor'
 
+// Update interfaces
 interface Task {
   id: string
   title: string
-  description: string
+  description_html?: string
   dueDate: Date
   completed: boolean
   userId: string
+  visibility?: string
 }
 
 interface AppNotification {
@@ -21,7 +24,6 @@ interface AppNotification {
   message: string
   timestamp: Date
   type: 'info' | 'warning' | 'urgent'
-  voiceNote?: string
 }
 
 interface UserData {
@@ -37,12 +39,12 @@ function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
-  const [users] = useState<Array<{ id: string; name: string; email: string; isAdmin: boolean }>>([])
-  const [newTask, setNewTask] = useState({ title: '', description: '', dueDate: '' })
-  const [newNotification, setNewNotification] = useState({ title: '', message: '', type: 'info' as const })
+  const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; isAdmin: boolean }>>([])
+  
+  // Link Handling state
+  const [isProcessingInvite, setIsProcessingInvite] = useState(false)
 
   useEffect(() => {
-    // Automatically skip login if running locally
     if (!currentUser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
       const localUser = {
         id: 'local-admin-debug',
@@ -50,45 +52,157 @@ function App() {
         name: 'Local Developer',
         isAdmin: true
       }
-      // Use handleLogin to ensure all data fetching triggers!
-      // (Ignoring the promise since it's an effect)
       handleLogin(localUser).catch(console.error)
     }
   }, [currentUser])
 
-  // Check browser notification permission
+  // Handle Invitation Links (e.g. /invite/TOKEN)
+  useEffect(() => {
+    const handleInvite = async () => {
+      if (currentUser && window.location.pathname.startsWith('/invite/')) {
+         const token = window.location.pathname.split('/invite/')[1]
+         if (token) {
+           setIsProcessingInvite(true)
+           try {
+             const fbToken = await auth.currentUser?.getIdToken() || 'local-debug-token'
+             const res = await fetch('/.netlify/functions/api?action=joinAdmin', {
+               method: 'POST',
+               headers: { 
+                 'Content-Type': 'application/json',
+                 'Authorization': `Bearer ${fbToken}`
+               },
+               body: JSON.stringify({ token })
+             })
+             if (res.ok) {
+               alert("Successfully connected to Admin workspace!")
+               window.history.replaceState(null, '', '/')
+               fetchTasks()
+             } else {
+               alert("Invalid or expired invite link.")
+             }
+           } catch (e) {
+             console.error(e)
+           }
+           setIsProcessingInvite(false)
+         }
+      }
+    }
+    handleInvite()
+  }, [currentUser])
+
   useEffect(() => {
     if ('Notification' in window) {
       Notification.requestPermission()
     }
   }, [])
 
-  // Check for tasks due tomorrow and send notifications
   useEffect(() => {
-    if (!currentUser) return
-    
-    const tomorrowTasks = tasks.filter(task => 
-      !task.completed && isTomorrow(task.dueDate) && task.userId === currentUser.id
-    )
-    
-    if (tomorrowTasks.length > 0 && Notification.permission === 'granted') {
-      tomorrowTasks.forEach(task => {
-        new Notification('Task Due Tomorrow', {
-          body: `"${task.title}" is due tomorrow!`,
-          icon: '/vite.svg'
+    if (!currentUser || !('serviceWorker' in navigator) || Notification.permission !== 'granted') return
+
+    // Keep track of local timeouts to avoid duplicates if app stays open
+    const localTimeouts: Record<string, ReturnType<typeof setTimeout>> = {}
+
+    const scheduleOfflineAlarms = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready
+        const supportsTriggers = 'showTrigger' in Notification.prototype
+        
+        let scheduledTags: string[] = []
+        if (supportsTriggers) {
+           const scheduledNotifications = await registration.getNotifications()
+           scheduledTags = scheduledNotifications.map(n => n.tag)
+        }
+
+        tasks.forEach(task => {
+          const dueTime = new Date(task.dueDate).getTime()
+          const now = Date.now()
+          const timeUntilDue = dueTime - now
+          
+          if (!task.completed && timeUntilDue > 0) {
+            const tag = `task-alarm-${task.id}`
+
+            // The fallback function: sends exactly at due time if app is open,
+            // or handles the "is tomorrow" reminder if they just open the app.
+            const setupFallback = () => {
+                // 1. Exact time timeout if timeUntilDue is acceptable for setTimeout (< 24 days)
+                if (timeUntilDue <= 2147483647 && !localTimeouts[tag]) {
+                    localTimeouts[tag] = setTimeout(() => {
+                        new Notification(`Task Due: ${task.title}`, {
+                            body: 'It is time for your task!',
+                            icon: '/vite.svg',
+                            tag: tag
+                        })
+                    }, timeUntilDue)
+                }
+
+                // 2. Immediate Reminder if the task is due "Tomorrow" and they just logged in
+                if (isTomorrow(task.dueDate) && !localTimeouts[`tomorrow-${task.id}`]) {
+                    localTimeouts[`tomorrow-${task.id}`] = setTimeout(() => {}, 1) // Just mark as sent
+                    new Notification('Task Due Tomorrow', {
+                        body: `"${task.title}" is due tomorrow!`,
+                        icon: '/vite.svg'
+                    })
+                }
+            }
+
+            if (supportsTriggers) {
+                // Use modern offline triggers
+                if (!scheduledTags.includes(tag)) {
+                  ;(registration as any).showNotification(`Task Due: ${task.title}`, {
+                    body: 'It is time for your scheduled task!',
+                    icon: '/vite.svg',
+                    tag: tag,
+                    showTrigger: new (window as any).TimestampTrigger(dueTime)
+                  }).catch((e: any) => {
+                      console.log('Offline trigger failed, using fallback:', e)
+                      setupFallback()
+                  })
+                }
+            } else {
+                // Fallback to active-tab timeouts and login reminders
+                setupFallback()
+            }
+          }
         })
-      })
+      } catch (e) {
+        console.error('Service worker offline scheduling error:', e)
+      }
+    }
+    
+    scheduleOfflineAlarms()
+
+    // Cleanup timeouts on unmount or tasks change
+    return () => {
+       Object.values(localTimeouts).forEach(clearTimeout)
     }
   }, [tasks, currentUser])
+
+  const fetchTasks = async () => {
+    if (!currentUser) return
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch(`/.netlify/functions/api?action=getTasks&userId=${currentUser.id}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setTasks(data.map((d: any) => ({
+        id: d._id,
+        title: d.title,
+        description_html: d.description_html,
+        dueDate: new Date(d.due_date),
+        completed: d.completed,
+        userId: d.user_id,
+        visibility: d.visibility || 'personal'
+      })))
+    }
+  }
 
   const handleLogin = async (user: UserData) => {
     setCurrentUser(user)
     setIsAdmin(user.isAdmin)
     
-    // Subscribe user to push
     subscribeUserToPush(user.id)
     
-    // Save user to MongoDB
     const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
     await fetch('/.netlify/functions/api?action=upsertUser', {
       method: 'POST',
@@ -104,20 +218,16 @@ function App() {
       })
     })
     
-    // Fetch tasks
-    const res = await fetch(`/.netlify/functions/api?action=getTasks&userId=${user.id}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    if (res.ok) {
-      const data = await res.json()
-      setTasks(data.map((d: any) => ({
-        id: d._id,
-        title: d.title,
-        description: d.description,
-        dueDate: new Date(d.due_date),
-        completed: d.completed,
-        userId: d.user_id
-      })))
+    await fetchTasks()
+    
+    // Load admin's linked users if admin
+    if (user.isAdmin) {
+       const userRes = await fetch(`/.netlify/functions/api?action=getLinkedUsers`, {
+         headers: { 'Authorization': `Bearer ${token}` }
+       })
+       if (userRes.ok) {
+         setUsers(await userRes.json())
+       }
     }
   }
 
@@ -127,16 +237,20 @@ function App() {
     setShowAdminPanel(false)
   }
 
-  const addTask = async () => {
-    if (newTask.title.trim() && currentUser) {
-      const taskObj = {
-        title: newTask.title,
-        description: newTask.description,
-        due_date: new Date(newTask.dueDate || Date.now()).toISOString(),
-        completed: false,
-        user_id: currentUser.id
+  const handleDeleteAccount = async () => {
+      if (!currentUser) return
+      if (confirm("Are you sure you want to completely delete your account? This action cannot be undone.")) {
+         const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+         await fetch('/.netlify/functions/api?action=deleteAccount', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+         })
+         handleLogout()
       }
-      
+  }
+
+  const handleCreateTaskObj = async (taskPayload: any) => {
+    if (currentUser) {
       const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
       const res = await fetch('/.netlify/functions/api?action=addTask', {
         method: 'POST',
@@ -144,21 +258,20 @@ function App() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(taskObj)
+        body: JSON.stringify({ ...taskPayload, user_id: currentUser.id })
       })
-      
       if (res.ok) {
         const data = await res.json()
         const task: Task = {
           id: data._id,
           title: data.title,
-          description: data.description,
+          description_html: data.description_html,
           dueDate: new Date(data.due_date),
           completed: data.completed,
-          userId: data.user_id
+          userId: data.user_id,
+          visibility: data.visibility || 'personal'
         }
-        setTasks([...tasks, task])
-        setNewTask({ title: '', description: '', dueDate: '' })
+        setTasks([task, ...tasks]) // PREPEND for newest first
       }
     }
   }
@@ -179,155 +292,113 @@ function App() {
     }
   }
 
-  const sendNotification = (notificationData: { title: string; message: string; type: 'info' | 'warning' | 'urgent' }) => {
-    const notification: AppNotification = {
-      id: Date.now().toString(),
-      title: notificationData.title,
-      message: notificationData.message,
-      timestamp: new Date(),
-      type: notificationData.type
-    }
-    setNotifications([notification, ...notifications])
-    
-    if (Notification.permission === 'granted') {
-      new Notification(notificationData.title, {
-        body: notificationData.message,
-        icon: '/vite.svg'
-      })
-    }
-  }
-
-  const handleSendNotification = () => {
-    if (newNotification.title.trim() && newNotification.message.trim()) {
-      sendNotification(newNotification)
-      setNewNotification({ title: '', message: '', type: 'info' })
-    }
-  }
-
   if (!currentUser) {
     return <Auth onLogin={handleLogin} />
   }
 
+  if (isProcessingInvite) {
+      return <div className="min-h-screen flex items-center justify-center bg-gray-100"><p className="text-xl">Linking to Admin Workspace...</p></div>
+  }
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-white shadow-sm border-b">
+    <div className="min-h-screen bg-gray-100 flex flex-col">
+      <header className="bg-white shadow-sm border-b sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-2">
               <Bell className="h-8 w-8 text-blue-600" />
-              <h1 className="text-2xl font-bold text-gray-900">Notfy</h1>
+              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Notfy</h1>
             </div>
             
             <div className="flex items-center space-x-4">
               {isAdmin && (
                 <button
                   onClick={() => setShowAdminPanel(!showAdminPanel)}
-                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition"
                 >
                   <Settings className="h-4 w-4" />
                   <span>{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
                 </button>
               )}
               
-              <div className="flex items-center space-x-2">
-                <User className="h-6 w-6 text-gray-600" />
-                <span className="text-sm text-gray-700">{currentUser.name}</span>
-                <button
-                  onClick={handleLogout}
-                  className="p-1 text-gray-400 hover:text-gray-600"
-                  title="Logout"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
+              <div className="relative group">
+                <div className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50">
+                  <User className="h-6 w-6 text-gray-600" />
+                  <span className="text-sm font-medium text-gray-700">{currentUser.name}</span>
+                </div>
+                {/* Simple Dropdown mapping */}
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white max-h-0 overflow-hidden group-hover:max-h-60 transition-all duration-300 shadow-xl rounded-md border border-gray-100">
+                   <button onClick={handleDeleteAccount} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center">
+                      <Trash2 className="h-4 w-4 mr-2"/> Delete Account
+                   </button>
+                   <button onClick={handleLogout} className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center">
+                      <LogOut className="h-4 w-4 mr-2"/> Sign Out
+                   </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {showAdminPanel ? (
           <AdminPanel 
             isAdmin={isAdmin}
             onToggleAdmin={() => setIsAdmin(!isAdmin)}
-            onSendNotification={sendNotification}
+            onSendNotification={(n: any) => setNotifications([n, ...notifications])} // Stubbed for now
             users={users}
           />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-                  <Calendar className="h-5 w-5 mr-2" />
+                <h2 className="text-xl font-semibold text-gray-800 flex items-center">
+                  <Calendar className="h-5 w-5 mr-2 text-blue-500" />
                   My Tasks
                 </h2>
-                <span className="text-sm text-gray-500">
-                  {tasks.filter(t => !t.completed && t.userId === currentUser.id).length} pending
+                <span className="text-sm px-3 py-1 bg-blue-50 text-blue-600 rounded-full font-medium">
+                  {tasks.filter(t => !t.completed).length} pending
                 </span>
               </div>
 
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <h3 className="text-lg font-medium mb-3">Add New Task</h3>
-                <div className="space-y-3">
-                    <input
-                      type="text"
-                      placeholder="Task title"
-                      value={newTask.title}
-                      onChange={(e) => setNewTask({...newTask, title: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  <textarea
-                    placeholder="Description (optional)"
-                    value={newTask.description}
-                    onChange={(e) => setNewTask({...newTask, description: e.target.value})}
-                    rows={2}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <input
-                    type="datetime-local"
-                    value={newTask.dueDate}
-                    onChange={(e) => setNewTask({...newTask, dueDate: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    onClick={addTask}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>Add Task</span>
-                  </button>
-                </div>
+              <div className="mb-8">
+                 <TaskEditor onSave={handleCreateTaskObj} isAdmin={isAdmin} />
               </div>
 
-              <div className="space-y-3">
-                {tasks
-                  .filter(task => task.userId === currentUser.id)
-                  .map((task) => (
+              <div className="space-y-4">
+                {tasks.map((task) => (
                   <div
                     key={task.id}
-                    className={`p-4 border rounded-lg ${
-                      task.completed ? 'bg-green-50 border-green-200' : 'bg-white border-gray-200'
+                    className={`p-4 border rounded-xl shadow-sm transition-all ${
+                      task.completed ? 'bg-green-50/50 border-green-200 opacity-75' : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md'
                     }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-3">
                           <button
                             onClick={() => toggleTaskCompletion(task.id)}
-                            className={`p-1 rounded ${
-                              task.completed ? 'text-green-600' : 'text-gray-400 hover:text-green-600'
+                            className={`p-1 rounded-full transition-colors ${
+                              task.completed ? 'text-green-500 bg-green-100' : 'text-gray-400 hover:text-green-500 hover:bg-green-50'
                             }`}
                           >
-                            <CheckCircle className="h-5 w-5" />
+                            <CheckCircle className="h-6 w-6" />
                           </button>
-                          <h3 className={`font-medium ${task.completed ? 'text-green-800 line-through' : 'text-gray-900'}`}>
+                          <h3 className={`text-lg font-medium ${task.completed ? 'text-green-800 line-through' : 'text-gray-900'}`}>
                             {task.title}
+                            {task.userId !== currentUser.id && (
+                                <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">From Admin</span>
+                            )}
                           </h3>
                         </div>
-                        {task.description && (
-                          <p className="text-sm text-gray-600 mt-1 ml-7">{task.description}</p>
+                        {task.description_html && (
+                          <div 
+                             className="text-sm text-gray-600 mt-3 ml-11 prose prose-sm max-w-none"
+                             dangerouslySetInnerHTML={{__html: task.description_html}}
+                          />
                         )}
-                        <p className="text-xs text-gray-500 mt-2 ml-7">
+                        <p className="text-xs text-gray-500 mt-4 ml-11 font-medium bg-gray-100 inline-block px-2 py-1 rounded-md">
                           Due: {format(task.dueDate, 'MMM dd, yyyy HH:mm')}
                         </p>
                       </div>
@@ -335,77 +406,42 @@ function App() {
                   </div>
                 ))}
                 
-                {tasks.filter(task => task.userId === currentUser.id).length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>No tasks yet. Add your first task above!</p>
+                {tasks.length === 0 && (
+                  <div className="text-center py-12 text-gray-400">
+                    <Calendar className="h-16 w-16 mx-auto mb-4 opacity-30 text-blue-500" />
+                    <p className="text-lg">No tasks yet. Add your first task above!</p>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-                  <Bell className="h-5 w-5 mr-2" />
+                <h2 className="text-xl font-semibold text-gray-800 flex items-center">
+                  <Bell className="h-5 w-5 mr-2 text-yellow-500" />
                   Notifications
                 </h2>
-                <span className="text-sm text-gray-500">{notifications.length} total</span>
+                <span className="text-sm px-3 py-1 bg-yellow-50 text-yellow-700 rounded-full font-medium">
+                   {notifications.length} total
+                </span>
               </div>
 
-              {isAdmin && (
-                <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-                  <h3 className="text-lg font-medium mb-3">Send Notification</h3>
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      placeholder="Notification title"
-                      value={newNotification.title}
-                      onChange={(e) => setNewNotification({...newNotification, title: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <textarea
-                      placeholder="Message"
-                      value={newNotification.message}
-                      onChange={(e) => setNewNotification({...newNotification, message: e.target.value})}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <select
-                      value={newNotification.type}
-                      onChange={(e) => setNewNotification({...newNotification, type: e.target.value as any})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="info">Info</option>
-                      <option value="warning">Warning</option>
-                      <option value="urgent">Urgent</option>
-                    </select>
-                    <button
-                      onClick={handleSendNotification}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                    >
-                      Send Notification
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {notifications.map((notification) => (
                   <div
                     key={notification.id}
-                    className={`p-4 border rounded-lg ${
+                    className={`p-4 border rounded-xl shadow-sm transition-all ${
                       notification.type === 'urgent' ? 'bg-red-50 border-red-200' :
                       notification.type === 'warning' ? 'bg-yellow-50 border-yellow-200' :
-                      'bg-gray-50 border-gray-200'
+                      'bg-blue-50 border-blue-200'
                     }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <h3 className="font-medium text-gray-900">{notification.title}</h3>
-                        <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
-                        <p className="text-xs text-gray-500 mt-2">
-                          {format(notification.timestamp, 'MMM dd, yyyy HH:mm:ss')}
+                        <h3 className="font-semibold text-gray-900">{notification.title}</h3>
+                        <p className="text-sm text-gray-700 mt-1.5 leading-relaxed">{notification.message}</p>
+                        <p className="text-xs text-gray-500 mt-3 font-medium">
+                          {format(notification.timestamp, 'MMM dd, yyyy HH:mm')}
                         </p>
                       </div>
                     </div>
@@ -413,9 +449,9 @@ function App() {
                 ))}
                 
                 {notifications.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    <Bell className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>No notifications yet.</p>
+                  <div className="text-center py-12 text-gray-400">
+                    <Bell className="h-16 w-16 mx-auto mb-4 opacity-30 text-yellow-500" />
+                    <p className="text-lg">No notifications yet.</p>
                   </div>
                 )}
               </div>
@@ -425,9 +461,9 @@ function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <p className="text-center text-sm text-gray-500 font-medium">
+      <footer className="bg-white border-t border-gray-100 mt-auto py-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <p className="text-center text-sm text-gray-500 font-medium tracking-wide">
             Made By: Ahmed Emad
           </p>
         </div>

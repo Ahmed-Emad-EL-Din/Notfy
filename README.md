@@ -1,60 +1,41 @@
-# Notfy - Browser Notification System
+# Notfy - Advanced Multi-Tenant Task & Notification Platform
 
-A React-based notification system that sends browser notifications for tasks and events, even when the browser is closed.
+Notfy is a powerful, offline-capable progressive web application (PWA) designed to manage tasks, dispatch cross-device alerts, and provide a seamless multi-tenant workflow for administrators and teams.
 
-## Features
+## Features Let Loose
 
-- ✅ Task management with due dates
-- ✅ Automatic browser notifications for tasks due tomorrow
-- ✅ Admin panel for sending notifications to users
-- ✅ Responsive design with Tailwind CSS
-- ✅ TypeScript for type safety
-- ✅ Browser notification support
+* **True Offline Triggers**: Built with the experimental *Notification Triggers API*, Notfy schedules hardware-level alerts locally without needing constant internet connection, dropping reminders precisely when they're due!
+* **Global Web Push Engine**: Features an automated hourly Node backend routine (Netlify Scheduled Functions) that blasts Standard Web Push updates to closed browsers and offline background instances using the VAPID architecture.
+* **Granular Admin Link Ecosystem**: Allow independent team leaders to maintain discrete dashboards. Admins generate tokenized invite links, looping general users natively into their shared workflow scopes. 
+* **Rich Text Editing**: Integrates beautiful document editing utilizing `react-quill`. Paint your tasks with proper structure, highlights, and headers.
+* **Premium Asynchronous UX**: Deploys localized interface timeouts, gradient shading, and visual hierarchies for a buttery smooth experience utilizing React and Tailwind CSS.
+* **Secure Deletion Methods**: Privacy matters. Contains simple triggers to securely dissolve MongoDB mappings, linked accounts, Firebase Auth footprints, and subscriptions anonymously.
 
 ## Tech Stack
+* **Frontend**: React, Vite, Tailwind CSS, Date-fns, React-Quill, Lucide-Icons
+* **Backend**: Netlify API Functions (Serverless), Netlify Built-in Background Cron
+* **Database**: MongoDB
+* **Authentication**: Firebase Auth (Google + Email)
+* **Storage** (Optional Config): Firebase Storage *(for upcoming audio deployments)*
 
-- React 18 + TypeScript
-- Vite (build tool)
-- Tailwind CSS (styling)
-- Lucide React (icons)
-- date-fns (date utilities)
+## Installation & Local Development
 
-## Getting Started
-
-1. Install dependencies:
+1. **Install Dependencies**:
 ```bash
 npm install
 ```
 
-2. Start development server:
+2. **Configure Environment Secret Files** (`.env`):
+* `VITE_FIREBASE_API_KEY` etc.
+* `VITE_MONGODB_URI`
+* `VAPID_PUBLIC_KEY` & `VAPID_PRIVATE_KEY`
+
+3. **Start the Vite Engine**:
 ```bash
 npm run dev
 ```
 
-3. Open http://localhost:5173/
+(Check `SETUP_AND_CONFIGURATION.md` for proper staging workflows regarding Netlify API variables and Push implementations).
 
-## Deployment to Netlify
-
-1. Push this repository to GitHub
-2. Connect your GitHub repo to Netlify
-3. Set build command: `npm run build`
-4. Set publish directory: `dist`
-5. Deploy!
-
-## Browser Notifications
-
-The app uses the browser's Notification API. Users will be prompted to allow notifications when they first use the app. Notifications will work even when the browser is closed (if permission is granted).
-
-## Admin Features
-
-- Toggle admin mode in the admin panel
-- Send notifications to all users
-- Support for different notification types (info, warning, urgent)
-
-## Demo Admin Login
-
-For testing admin features, use these credentials on the login page:
-- **Email**: admin@notfy.com
-- **Password**: admin123
-
-Click the "Use Admin Demo Account" button on the login form to auto-fill these credentials.
+---
+Made By Ahmed Emad
