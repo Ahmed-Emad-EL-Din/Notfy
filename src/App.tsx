@@ -58,6 +58,8 @@ function App() {
   
   // Editing State
   const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [activeTab, setActiveTab] = useState<'tasks' | 'notifications'>('tasks')
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
 
   const processingLogins = useRef(new Set<string>())
 
@@ -589,91 +591,121 @@ function App() {
       <header className="bg-white shadow-sm border-b sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-2">
-              <Bell className="h-8 w-8 text-blue-600" />
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">RelaySignal</h1>
+            <div className="flex items-center space-x-1 sm:space-x-2">
+              <Bell className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">RelaySignal</h1>
             </div>
             
             <div className="flex items-center space-x-4">
               {isAdmin && (
                 <button
                   onClick={() => setShowAdminPanel(!showAdminPanel)}
-                  className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition"
+                  className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition text-sm sm:text-base"
                 >
                   <Settings className="h-4 w-4" />
-                  <span>{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
+                  <span className="hidden sm:inline">{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
+                  <span className="sm:hidden">{showAdminPanel ? 'User' : 'Admin'}</span>
                 </button>
               )}
               
-              <div className="relative group">
-                <div className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50">
+              <div className="relative">
+                <div 
+                  onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                  className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50 transition-colors"
+                >
                   <User className="h-6 w-6 text-gray-600" />
-                  <span className="text-sm font-medium text-gray-700">{currentUser.name}</span>
+                  <span className="text-sm font-medium text-gray-700 hidden sm:inline">{currentUser.name}</span>
                 </div>
-                {/* Simple Dropdown mapping */}
-                <div className="absolute right-0 top-full mt-2 w-56 bg-white max-h-0 overflow-hidden group-hover:max-h-60 transition-all duration-300 shadow-xl rounded-md border border-gray-100">
-                   
-                   {!telegramStatus.connected ? (
-                      <div className="border-b">
-                        <button 
-                          disabled={telegramStatus.polling}
-                          onClick={async () => {
-                             setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
-                             const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
-                             fetch('/.netlify/functions/api?action=registerWebhook', {
-                                 method: 'POST',
-                                 headers: { 'Authorization': `Bearer ${token}` }
-                             }).catch(() => {});
-                             window.location.href = `tg://resolve?domain=RelaySignals_bot&start=${currentUser.id}`;
-                          }} 
-                          className={`w-full text-left px-4 py-3 text-sm flex items-center ${telegramStatus.polling ? 'text-gray-400 bg-gray-50' : 'text-blue-600 hover:bg-blue-50'}`}
-                        >
-                           <Bell className={`h-4 w-4 mr-2 ${telegramStatus.polling ? 'animate-bounce' : ''}`}/> 
-                           <span>{telegramStatus.polling ? 'Waiting for Bot...' : 'Connect Telegram App'}</span>
-                        </button>
-                        {telegramStatus.polling && (
-                          <div className="px-4 pb-3 text-[10px] text-gray-400">
-                             Didn't open? <a href={`https://t.me/RelaySignals_bot?start=${currentUser.id}`} target="_blank" className="text-blue-500 underline ml-1">Try the web version</a>
+                
+                {isUserMenuOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setIsUserMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 top-full mt-2 w-56 bg-white shadow-xl rounded-lg border border-gray-100 z-20 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                      {!telegramStatus.connected ? (
+                          <div className="border-b border-gray-50">
+                            <button 
+                              disabled={telegramStatus.polling}
+                              onClick={async () => {
+                                setIsUserMenuOpen(false)
+                                setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
+                                const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+                                fetch('/.netlify/functions/api?action=registerWebhook', {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${token}` }
+                                }).catch(() => {});
+                                window.location.href = `tg://resolve?domain=RelaySignals_bot&start=${currentUser.id}`;
+                              }} 
+                              className={`w-full text-left px-4 py-3 text-sm flex items-center transition-colors ${telegramStatus.polling ? 'text-gray-400 bg-gray-50' : 'text-blue-600 hover:bg-blue-50'}`}
+                            >
+                              <Bell className={`h-4 w-4 mr-2 ${telegramStatus.polling ? 'animate-bounce' : ''}`}/> 
+                              <span>{telegramStatus.polling ? 'Waiting for Bot...' : 'Connect Telegram App'}</span>
+                            </button>
+                            {telegramStatus.polling && (
+                              <div className="px-4 pb-3 text-[10px] text-gray-400">
+                                Didn't open? <a href={`https://t.me/RelaySignals_bot?start=${currentUser.id}`} target="_blank" className="text-blue-500 underline ml-1">Try the web version</a>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                   ) : (
-                     <>
-                        <div className="px-4 py-3 text-sm text-green-600 font-medium border-b flex items-center bg-green-50/50">
-                           <CheckCircle className="h-4 w-4 mr-2" />
-                           Telegram Linked
+                      ) : (
+                        <div className="border-b border-gray-50">
+                            <div className="px-4 py-3 text-sm text-green-600 font-medium flex items-center bg-green-50/50">
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Telegram Linked
+                            </div>
+                            <button 
+                              onClick={() => { setIsUserMenuOpen(false); handleTestTelegram(); }}
+                              className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors"
+                            >
+                              <Bell className="h-4 w-4 mr-2 text-blue-500"/> 
+                              Send Test Notification
+                            </button>
+                            <button 
+                              onClick={() => { setIsUserMenuOpen(false); handleDisconnectTelegram(); }}
+                              className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2"/> 
+                              Disconnect Telegram
+                            </button>
                         </div>
-                        <button 
-                           onClick={handleTestTelegram}
-                           className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center border-b"
-                        >
-                           <Bell className="h-4 w-4 mr-2 text-blue-500"/> 
-                           Send Test Notification
-                        </button>
-                        <button 
-                           onClick={handleDisconnectTelegram}
-                           className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center border-b"
-                        >
-                           <Trash2 className="h-4 w-4 mr-2"/> 
-                           Disconnect Telegram
-                        </button>
-                     </>
-                   )}
+                      )}
 
-                   <button onClick={handleUnlinkAdmin} className="w-full text-left px-4 py-3 text-sm text-yellow-600 hover:bg-yellow-50 flex items-center border-b">
-                      <LogOut className="h-4 w-4 mr-2"/> Unlink Workspace
-                   </button>
-                   <button onClick={handleDeleteAccount} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center">
-                      <Trash2 className="h-4 w-4 mr-2"/> Delete Account
-                   </button>
-                   <button onClick={handleLogout} className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center">
-                      <LogOut className="h-4 w-4 mr-2"/> Sign Out
-                   </button>
-                </div>
+                      <button onClick={() => { setIsUserMenuOpen(false); handleUnlinkAdmin(); }} className="w-full text-left px-4 py-3 text-sm text-yellow-600 hover:bg-yellow-50 flex items-center transition-colors">
+                          <LogOut className="h-4 w-4 mr-2"/> Unlink Workspace
+                      </button>
+                      <button onClick={() => { setIsUserMenuOpen(false); handleDeleteAccount(); }} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors">
+                          <Trash2 className="h-4 w-4 mr-2"/> Delete Account
+                      </button>
+                      <button onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors">
+                          <LogOut className="h-4 w-4 mr-2"/> Sign Out
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
         </div>
+        
+        {/* Mobile Tab Switcher */}
+        {!showAdminPanel && (
+          <div className="lg:hidden border-t border-gray-100 flex items-center bg-white px-2 pt-1">
+            <button 
+              onClick={() => setActiveTab('tasks')}
+              className={`flex-1 py-3 text-sm font-semibold transition-all border-b-2 ${activeTab === 'tasks' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`}
+            >
+              Tasks
+            </button>
+            <button 
+              onClick={() => setActiveTab('notifications')}
+              className={`flex-1 py-3 text-sm font-semibold transition-all border-b-2 ${activeTab === 'notifications' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'}`}
+            >
+              Notifications
+            </button>
+          </div>
+        )}
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
@@ -685,8 +717,8 @@ function App() {
             users={users}
           />
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 ${activeTab !== 'tasks' ? 'hidden lg:block' : ''}`}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-gray-800 flex items-center">
                   <Calendar className="h-5 w-5 mr-2 text-blue-500" />
@@ -747,13 +779,13 @@ function App() {
                         </div>
                         {task.description_html && (
                           <div 
-                             className="text-sm text-gray-600 mt-3 ml-11 prose prose-sm max-w-none"
+                             className="text-sm text-gray-600 mt-3 ml-8 sm:ml-11 prose prose-sm max-w-none"
                              dangerouslySetInnerHTML={{__html: task.description_html}}
                           />
                         )}
                         
                         {task.type === 'poll' && (
-                           <div className="mt-4 ml-11 bg-gray-50 border p-3 rounded-lg max-w-sm">
+                           <div className="mt-4 ml-8 sm:ml-11 bg-gray-50 border p-3 rounded-lg max-w-sm">
                               <h4 className="text-sm font-semibold mb-2">Vote on Option:</h4>
                               {task.pollOptions?.map((opt, idx) => {
                                   const votedHere = task.votes && task.votes[idx] && task.votes[idx].some(v => v.uid === currentUser.id);
@@ -787,7 +819,7 @@ function App() {
                            </div>
                         )}
                         
-                        <div className="ml-11 flex items-center space-x-2 mt-4 flex-wrap gap-y-2">
+                        <div className="ml-8 sm:ml-11 flex items-center space-x-2 mt-4 flex-wrap gap-y-2">
                             {['👍', '❤️', '👀', '🔥', '😢'].map(emoji => {
                                 const reacted = task.reactions && task.reactions[emoji] && task.reactions[emoji].includes(currentUser.id);
                                 const count = task.reactions && task.reactions[emoji] ? task.reactions[emoji].length : 0;
@@ -803,7 +835,7 @@ function App() {
                             })}
                         </div>
                         
-                        <div className="flex items-center justify-between mt-5 ml-11 border-t pt-4 border-gray-100">
+                        <div className="flex items-center justify-between mt-5 ml-8 sm:ml-11 border-t pt-4 border-gray-100">
                           <p className="text-xs text-gray-500 font-medium bg-gray-100/80 inline-block px-2.5 py-1.5 rounded-md flex items-center">
                             Due: {format(task.dueDate, 'MMM dd, yyyy HH:mm')}
                           </p>
@@ -851,7 +883,7 @@ function App() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 ${activeTab !== 'notifications' ? 'hidden lg:block' : ''}`}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-gray-800 flex items-center">
                   <Bell className="h-5 w-5 mr-2 text-yellow-500" />

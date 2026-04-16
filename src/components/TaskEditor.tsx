@@ -248,8 +248,8 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
           />
         </div>
 
-        <div className="flex space-x-4 items-center">
-          <div className="flex-1">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
             <label className="block text-sm text-gray-600 mb-1">Due Date</label>
             <input
               type="datetime-local"
@@ -259,7 +259,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
             />
           </div>
 
-          <div className="flex-1">
+          <div>
             <label className="block text-sm text-gray-600 mb-1">Group Name (Optional)</label>
             <input
               type="text"
@@ -270,7 +270,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
             />
           </div>
 
-          <div className="flex-1">
+          <div>
             <label className="block text-sm text-gray-600 mb-1">Visibility</label>
             <select
               value={visibility}
