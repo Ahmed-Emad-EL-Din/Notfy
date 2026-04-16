@@ -86,7 +86,11 @@ function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
           setError(getFriendlyError(err))
         }
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        setLoading(false)
+        // Clear flag after handling redirect result (even if it was null)
+        localStorage.removeItem('relaysignal_redirect_pending')
+      })
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -122,10 +126,12 @@ function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
     setLoading(true)
     try {
       const provider = new GoogleAuthProvider()
+      // Flag that we are starting a redirect flow
+      localStorage.setItem('relaysignal_redirect_pending', '1')
       // Use redirect instead of popup — works on all browsers without popup blocker issues
       await signInWithRedirect(auth, provider)
-      // Page will redirect to Google and come back. Result handled in useEffect above.
     } catch (err: any) {
+      localStorage.removeItem('relaysignal_redirect_pending')
       console.error(err)
       setError(err.message || 'Google Auth failed')
       setLoading(false)

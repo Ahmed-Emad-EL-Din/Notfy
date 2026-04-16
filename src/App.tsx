@@ -75,18 +75,33 @@ function App() {
             name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
             isAdmin: false // will be updated from MongoDB in handleLogin
           })
-        } else if (isLocal) {
-          // Local dev bypass — only runs if Firebase has no session
-          await handleLogin({
-            id: 'local-admin-debug',
-            email: 'local@dev.com',
-            name: 'Local Developer',
-            isAdmin: true
-          }).catch(console.error)
+          setIsInitializing(false)
+        } else {
+          // If we are waiting for a redirect, DO NOT hide the loading screen yet
+          const isRedirectPending = localStorage.getItem('relaysignal_redirect_pending') === '1'
+          
+          if (isRedirectPending) {
+             console.log("Redirect pending detected, holding loading screen...")
+             // Safety timeout: if getRedirectResult doesn't fire within 8s, show login anyway
+             setTimeout(() => {
+                setIsInitializing(false)
+             }, 8000)
+             return;
+          }
+
+          if (isLocal) {
+            // Local dev bypass — only runs if Firebase has no session
+            await handleLogin({
+              id: 'local-admin-debug',
+              email: 'local@dev.com',
+              name: 'Local Developer',
+              isAdmin: true
+            }).catch(console.error)
+          }
+          setIsInitializing(false)
         }
       } catch (err) {
         console.error("Auth listener error:", err)
-      } finally {
         setIsInitializing(false)
       }
     })
