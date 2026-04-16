@@ -25,7 +25,14 @@ function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [verificationSent, setVerificationSent] = useState(false)
-  const [selectedRole, setSelectedRole] = useState<'user' | 'admin'>('user')
+  const [selectedRole, setSelectedRole] = useState<'user' | 'admin'>(() => {
+    return (sessionStorage.getItem('relaysignal_signup_role') as 'user' | 'admin') || 'user'
+  })
+
+  // Keep sessionStorage in sync
+  useEffect(() => {
+    sessionStorage.setItem('relaysignal_signup_role', selectedRole)
+  }, [selectedRole])
 
   // Friendly error messages instead of raw Firebase codes
   const getFriendlyError = (err: any): string => {
@@ -47,16 +54,22 @@ function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
   // Must be defined before useEffect since it's referenced inside it
   const handleAuthResult = async (userCredential: any, isNewSignup = false) => {
     const user = userCredential.user
-
-    // Email verification check disabled to prevent redirect loops.
-    // Users can now enter the app immediately after signup.
     
+    // Get persisted role if this was a redirect return
+    const storedRole = sessionStorage.getItem('relaysignal_signup_role') as 'user' | 'admin'
+    const finalRole = isNewSignup ? selectedRole : (storedRole || 'user')
+
     onLogin({
       id: user.uid,
       email: user.email,
       name: user.displayName || formData.name || user.email?.split('@')[0] || 'User',
-      isAdmin: isNewSignup ? (selectedRole === 'admin') : false // Role is only picked during new signup
+      isAdmin: (isNewSignup || storedRole) ? (finalRole === 'admin') : false 
     })
+    
+    // Clear only after successful onLogin trigger
+    if (storedRole && !isNewSignup) {
+        sessionStorage.removeItem('relaysignal_signup_role')
+    }
   }
 
   // Handle the redirect result when the user returns from Google sign-in

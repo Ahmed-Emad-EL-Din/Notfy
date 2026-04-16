@@ -52,29 +52,36 @@ function App() {
   // Editing State
   const [editingTask, setEditingTask] = useState<Task | null>(null)
 
+  const processingLogins = new Set<string>()
+
   // Listen to Firebase Auth session — restores login on page refresh automatically
   useEffect(() => {
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // Firebase has an active session — restore it silently
-        await handleLogin({
-          id: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-          isAdmin: false // will be updated from MongoDB in handleLogin
-        })
-      } else if (isLocal) {
-        // Local dev bypass — only runs if Firebase has no session
-        await handleLogin({
-          id: 'local-admin-debug',
-          email: 'local@dev.com',
-          name: 'Local Developer',
-          isAdmin: true
-        }).catch(console.error)
+      try {
+        if (firebaseUser) {
+          // Firebase has an active session — restore it silently
+          await handleLogin({
+            id: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+            isAdmin: false // will be updated from MongoDB in handleLogin
+          })
+        } else if (isLocal) {
+          // Local dev bypass — only runs if Firebase has no session
+          await handleLogin({
+            id: 'local-admin-debug',
+            email: 'local@dev.com',
+            name: 'Local Developer',
+            isAdmin: true
+          }).catch(console.error)
+        }
+      } catch (err) {
+        console.error("Auth listener error:", err)
+      } finally {
+        setIsInitializing(false)
       }
-      setIsInitializing(false)
     })
 
     return () => unsubscribe()
@@ -294,43 +301,51 @@ function App() {
   }, [tasks])
 
   const handleLogin = async (user: UserData) => {
-    setCurrentUser(user)
-    setIsAdmin(user.isAdmin)
-    
-    subscribeUserToPush(user.id)
-    
-    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
-    const upsertRes = await fetch('/.netlify/functions/api?action=upsertUser', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        is_admin: user.isAdmin
-      })
-    })
+    // Prevent redundant concurrent calls for the same user
+    if (processingLogins.has(user.id)) return
+    processingLogins.add(user.id)
 
-    if (upsertRes.ok) {
-        const dbUser = await upsertRes.json();
-        // Sync the actual admin status from DB
-        setIsAdmin(dbUser.is_admin);
-        setCurrentUser(prev => prev ? { ...prev, isAdmin: dbUser.is_admin } : prev);
+    try {
+        setCurrentUser(user)
+        setIsAdmin(user.isAdmin)
         
-        await fetchTasks()
+        subscribeUserToPush(user.id)
         
-        // Load admin's linked users if admin
-        if (dbUser.is_admin) {
-           const userRes = await fetch(`/.netlify/functions/api?action=getLinkedUsers`, {
-             headers: { 'Authorization': `Bearer ${token}` }
-           })
-           if (userRes.ok) {
-             setUsers(await userRes.json())
-           }
+        const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+        const upsertRes = await fetch('/.netlify/functions/api?action=upsertUser', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            is_admin: user.isAdmin
+          })
+        })
+
+        if (upsertRes.ok) {
+            const dbUser = await upsertRes.json();
+            // Sync the actual admin status from DB
+            setIsAdmin(dbUser.is_admin);
+            setCurrentUser(prev => prev ? { ...prev, isAdmin: dbUser.is_admin } : prev);
+            
+            await fetchTasks()
+            
+            // Load admin's linked users if admin
+            if (dbUser.is_admin) {
+              const userRes = await fetch(`/.netlify/functions/api?action=getLinkedUsers`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              })
+              if (userRes.ok) {
+                setUsers(await userRes.json())
+              }
+            }
         }
+    } finally {
+        processingLogins.delete(user.id)
     }
   }
 
