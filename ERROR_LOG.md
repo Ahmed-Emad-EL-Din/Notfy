@@ -1,12 +1,12 @@
-## 8. Android Browser Login Loop
+## 8. Android Browser Login Loop (Ultimate Fix)
 **Symptoms:** 
-- Users on Android Chrome or In-App Browsers experience a loop where they login successfully but are flickered back to the login screen.
+- Users on Android Chrome experience a loop where they login successfully but are flickered back to the login screen.
 **Root Cause:** 
-- `processingLogins` was reset on every render, failing to prevent concurrent auth event "clashes".
-- Mobile browsers clear transient session state faster, causing `onAuthStateChanged` to fire with `null` momentarily before the session is restored.
+- `onAuthStateChanged` fires once with `null` on startup before the redirect results are processed. This caused the UI to prematurely hide the loading screen and show the Login form, which then interrupted the SDK's internal logic.
 **Solution:** 
-- Moved `processingLogins` to a `useRef` to properly deduplicate events.
-- Set explicit `browserLocalPersistence` in `firebase.ts` to ensure Android retains the session across redirects.
+- **Redirect Flagging**: Implemented a `relaysignal_redirect_pending` flag in `localStorage` that is set the moment "Continue with Google" is clicked.
+- **Defensive Loading**: Updated `App.tsx` to check this flag. If set, the app **stays on the loading screen** for up to 8 seconds, giving the `Auth` component enough time to finish the redirect flow.
+- **Result**: The "Flicker" is eliminated, and the user remains on the loading screen until the Dashboard is ready.
 
 ## 9. Telegram Connection Timeout
 **Symptoms:** 
