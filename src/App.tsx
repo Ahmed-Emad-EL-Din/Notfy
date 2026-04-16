@@ -352,13 +352,6 @@ function App() {
       }
   }
 
-  const handleCreateTaskObj = async (taskPayload: any) => {
-    if (currentUser) {
-      const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
-      const res = await fetch('/.netlify/functions/api?action=addTask', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
   const handleCreateTaskObj = async (taskObj: any) => {
     if (!currentUser) return
     const idToken = await auth.currentUser?.getIdToken() || 'local-debug-token'
