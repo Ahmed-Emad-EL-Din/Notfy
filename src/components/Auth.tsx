@@ -26,6 +26,47 @@ function Auth({ onLogin }: AuthProps) {
   const [loading, setLoading] = useState(false)
   const [verificationSent, setVerificationSent] = useState(false)
 
+  // Friendly error messages instead of raw Firebase codes
+  const getFriendlyError = (err: any): string => {
+    const code = err.code || ''
+    const messages: Record<string, string> = {
+      'auth/user-not-found':       'No account found with this email. Please sign up first.',
+      'auth/wrong-password':       'Incorrect password. Please try again.',
+      'auth/invalid-credential':   'Incorrect email or password. Please try again.',
+      'auth/email-already-in-use': 'An account with this email already exists. Try signing in.',
+      'auth/weak-password':        'Password must be at least 6 characters.',
+      'auth/invalid-email':        'Please enter a valid email address.',
+      'auth/too-many-requests':    'Too many failed attempts. Please wait a few minutes and try again.',
+      'auth/network-request-failed': 'Network error. Please check your internet connection.',
+    }
+    return messages[code] || err.message || 'Authentication failed. Please try again.'
+  }
+
+  // Must be defined before useEffect since it's referenced inside it
+  const handleAuthResult = async (userCredential: any, isNewSignup = false) => {
+    const user = userCredential.user
+
+    // Only send verification email on first signup, not on every login
+    if (isNewSignup && user.providerData[0]?.providerId === 'password' && !user.emailVerified) {
+      await sendEmailVerification(user)
+      setVerificationSent(true)
+      return
+    }
+
+    // If user signed up but hasn't verified email yet and tries to log in again
+    if (!isNewSignup && user.providerData[0]?.providerId === 'password' && !user.emailVerified) {
+      setError('Please verify your email first. Check your inbox for the verification link.')
+      return
+    }
+
+    onLogin({
+      id: user.uid,
+      email: user.email,
+      name: user.displayName || formData.name || user.email?.split('@')[0] || 'User',
+      isAdmin: false
+    })
+  }
+
   // Handle the redirect result when the user returns from Google sign-in
   useEffect(() => {
     setLoading(true)
@@ -37,33 +78,15 @@ function Auth({ onLogin }: AuthProps) {
       })
       .catch((err) => {
         if (err.code !== 'auth/popup-closed-by-user') {
-          setError(err.message || 'Google sign-in failed')
+          setError(getFriendlyError(err))
         }
       })
       .finally(() => setLoading(false))
   }, [])
 
-  const handleAuthResult = async (userCredential: any) => {
-    const user = userCredential.user
-    
-    // We require email verification for password accounts
-    if (user.providerData[0]?.providerId === 'password' && !user.emailVerified) {
-      await sendEmailVerification(user)
-      setVerificationSent(true)
-      return
-    }
-
-    onLogin({
-      id: user.uid,
-      email: user.email,
-      name: user.displayName || formData.name || user.email?.split('@')[0] || 'User',
-      isAdmin: false // Can be hooked into MongoDB later
-    })
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!auth) return setError("Firebase configuration missing.")
+    if (!auth) return setError("Firebase not configured. Check your environment variables.")
 
     setError(null)
     setLoading(true)
@@ -75,14 +98,14 @@ function Auth({ onLogin }: AuthProps) {
 
       if (isLogin) {
         const result = await signInWithEmailAndPassword(auth, formData.email, formData.password)
-        await handleAuthResult(result)
+        await handleAuthResult(result, false) // not a signup
       } else {
         const result = await createUserWithEmailAndPassword(auth, formData.email, formData.password)
-        await handleAuthResult(result)
+        await handleAuthResult(result, true) // is a signup
       }
     } catch (err: any) {
       console.error(err)
-      setError(err.message || 'Authentication failed')
+      setError(getFriendlyError(err))
     } finally {
       setLoading(false)
     }
