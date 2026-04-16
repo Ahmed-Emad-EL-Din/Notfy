@@ -11,19 +11,29 @@ if (!admin.apps.length) {
 
   try {
     if (serviceAccount) {
-      // Full service account JSON provided in Netlify
-      const cert = JSON.parse(serviceAccount)
+      // In some environments, the JSON might be wrapped in extra quotes or have escaped newlines
+      let parsedCert;
+      try {
+        parsedCert = JSON.parse(serviceAccount);
+      } catch (e) {
+        // Fallback: Try to handle multiline or escaped strings if JSON.parse fails
+        console.warn("Standard JSON.parse failed for FIREBASE_SERVICE_ACCOUNT, attempting cleanup...");
+        const cleaned = serviceAccount.trim().replace(/\\n/g, '\n');
+        parsedCert = JSON.parse(cleaned);
+      }
+
       admin.initializeApp({
-        credential: admin.credential.cert(cert)
+        credential: admin.credential.cert(parsedCert)
       })
+      console.log("Firebase Admin initialized successfully.");
     } else if (projectId) {
-      // Fallback for local dev if only project ID is set
       admin.initializeApp({
         projectId: projectId
       })
+      console.log("Firebase Admin initialized with projectId only.");
     }
-  } catch (e) {
-    console.error("Firebase admin init error:", e)
+  } catch (e: any) {
+    console.error("Firebase admin init error:", e.message)
   }
 }
 
