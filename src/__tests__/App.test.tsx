@@ -15,7 +15,7 @@ vi.mock('../lib/firebase', () => ({
 }));
 
 vi.mock('firebase/auth', () => ({
-  onAuthStateChanged: vi.fn((auth, cb) => {
+  onAuthStateChanged: vi.fn((_auth, cb) => {
     // trigger auth state asynchronously
     setTimeout(() => {
         cb({ uid: 'user123', email: 'test@example.com', displayName: 'Test User' });

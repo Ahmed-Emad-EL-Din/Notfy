@@ -11,6 +11,11 @@ import TaskEditor from './components/TaskEditor'
 // Update interfaces
 interface Task {
   id: string
+  title: string
+  description_html?: string
+  dueDate: Date
+  completed: boolean
+  userId: string
   visibility?: string
   groupName?: string
   type?: 'standard' | 'poll'
