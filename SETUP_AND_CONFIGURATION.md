@@ -103,3 +103,23 @@ Your `VITE_FIREBASE_PROJECT_ID` is visible in multiple places in Firebase Consol
    - **Value:** Paste the full JSON as-is (Netlify handles multi-line values)
 
 > ⚠️ **Never commit this JSON to GitHub!** It is a sensitive secret key. Only store it in Netlify's Environment Variables. Your `.gitignore` already excludes `.env` so you are protected locally.
+
+## 8. Android & Mobile Browser Stability (CRITICAL)
+Modern mobile browsers (like Chrome on Android) often block "Third-Party Storage," which can cause a login loop if your app is on Netlify and your login is on Firebase. To fix this, we implement a **First-Party Auth Proxy**.
+
+**Step 1: Authorized Domains (Firebase Console)**
+1. Go to [Firebase Console](https://console.firebase.google.com) -> **Authentication** -> **Settings**.
+2. Click the **"Authorized domains"** tab.
+3. Click **"Add domain"** and add: `relaysignal.netlify.app`.
+
+**Step 2: Authorized Redirect URIs (Google Cloud Console)**
+1. Go to the [Google Cloud Console Credentials Page](https://console.cloud.google.com/apis/credentials).
+2. Ensure your project (`relaysignal-88d8c`) is selected at the top.
+3. Under **OAuth 2.0 Client IDs**, click the **Pencil icon (Edit)** for your **Web Client**.
+4. Scroll to **"Authorized redirect URIs"**.
+5. Click **"ADD URI"** and paste exactly:
+   `https://relaysignal.netlify.app/__/auth/handler`
+6. Click **SAVE** at the bottom.
+
+> [!IMPORTANT]
+> Google Cloud settings can take up to **10 minutes** to propagate. If you get a `redirect_uri_mismatch` error immediately after saving, wait a few minutes and try again.
