@@ -397,12 +397,12 @@ export const handler = async (event: any, context: any) => {
     }
 
     if (action === 'upsertSubscription' && event.httpMethod === 'POST') {
-      const { user_id, endpoint, keys } = body
+      const { user_id, endpoint, p256dh, auth } = body
       if (!uid || user_id !== uid) throw new Error('Unauthorized')
 
       await db.collection('push_subscriptions').updateOne(
         { endpoint },
-        { $set: { user_id, endpoint, keys, updated_at: new Date() } },
+        { $set: { user_id, endpoint, keys: { p256dh, auth }, updated_at: new Date() } },
         { upsert: true }
       )
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }

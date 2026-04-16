@@ -1,3 +1,11 @@
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener('push', function(event) {
   if (event.data) {
     let data;
@@ -13,9 +21,11 @@ self.addEventListener('push', function(event) {
       icon: '/vite.svg',
       badge: '/vite.svg',
       vibrate: [200, 100, 200, 100, 200],
+      tag: 'notfy-notification', // Ensures notifications don't group invisibly
+      renotify: true, // Vibrates even if a notification with same tag is shown
       data: {
         dateOfArrival: Date.now(),
-        primaryKey: 1
+        url: data.data?.url || '/'
       }
     };
 
@@ -25,18 +35,17 @@ self.addEventListener('push', function(event) {
 
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
-  event.waitUntil(clients.matchAll({ type: 'window' }).then(windowClients => {
-    // Check if there is already a window/tab open with the target URL
+  const urlToOpen = event.notification.data.url || '/';
+
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
     for (var i = 0; i < windowClients.length; i++) {
       var client = windowClients[i];
-      // If so, just focus it.
-      if (client.url === '/' && 'focus' in client) {
+      if (client.url === urlToOpen && 'focus' in client) {
         return client.focus();
       }
     }
-    // If not, then open the target URL in a new window/tab.
     if (clients.openWindow) {
-      return clients.openWindow('/');
+      return clients.openWindow(urlToOpen);
     }
   }));
 });
