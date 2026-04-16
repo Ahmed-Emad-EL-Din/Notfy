@@ -19,6 +19,13 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
   const [isRecording, setIsRecording] = useState(false);
   const [voiceNoteUrl, setVoiceNoteUrl] = useState<string | null>(null);
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  
+  // New features
+  const [groupName, setGroupName] = useState('');
+  const [isPoll, setIsPoll] = useState(false);
+  const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
+  const [showPollResults, setShowPollResults] = useState(true);
+
   const quillRef = useRef<ReactQuill>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -36,6 +43,10 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
         }
         setVisibility(initialTask.visibility || 'personal');
         setVoiceNoteUrl(initialTask.voiceNoteUrl || initialTask.voice_note_url || null);
+        setGroupName(initialTask.groupName || '');
+        setIsPoll(initialTask.isPoll || false);
+        setPollOptions(initialTask.pollOptions?.length ? initialTask.pollOptions : ['', '']);
+        setShowPollResults(initialTask.showPollResults !== undefined ? initialTask.showPollResults : true);
     } else {
         // Reset if we stop editing
         setTitle('');
@@ -43,6 +54,10 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
         setDueDate('');
         setVisibility('personal');
         setVoiceNoteUrl(null);
+        setGroupName('');
+        setIsPoll(false);
+        setPollOptions(['', '']);
+        setShowPollResults(true);
     }
   }, [initialTask]);
 
@@ -163,6 +178,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
         [{ 'header': [1, 2, false] }],
         ['bold', 'italic', 'underline', 'strike', 'blockquote'],
         [{ 'list': 'ordered' }, { 'list': 'bullet' }, { 'indent': '-1' }, { 'indent': '+1' }],
+        [{ 'color': [] }, { 'background': [] }],
         ['link', 'image'],
         ['clean']
       ],
@@ -170,7 +186,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
     }
   }), []);
 
-  const formats = ['header', 'bold', 'italic', 'underline', 'strike', 'blockquote', 'list', 'bullet', 'indent', 'link', 'image'];
+  const formats = ['header', 'bold', 'italic', 'underline', 'strike', 'blockquote', 'list', 'bullet', 'indent', 'color', 'background', 'link', 'image'];
 
   const handleSave = () => {
     if (!title.trim() || isUploadingImage || isUploadingAudio) return;
@@ -181,16 +197,23 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
       due_date: new Date(dueDate || Date.now()).toISOString(),
       completed: initialTask?.completed || false,
       visibility,
-      type: 'standard',
+      type: isPoll ? 'poll' : 'standard',
       voice_note_url: voiceNoteUrl,
-      reactions: initialTask?.reactions || [],
-      votes: initialTask?.votes || []
+      reactions: initialTask?.reactions || {},
+      votes: initialTask?.votes || {},
+      groupName: groupName.trim() || undefined,
+      isPoll,
+      pollOptions: isPoll ? pollOptions.filter(o => o.trim() !== '') : [],
+      showPollResults: isPoll ? showPollResults : false
     });
     if (!initialTask) {
         setTitle('');
         setDescriptionHtml('');
         setDueDate('');
         setVoiceNoteUrl(null);
+        setGroupName('');
+        setIsPoll(false);
+        setPollOptions(['', '']);
     }
   };
 
@@ -236,7 +259,18 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
             />
           </div>
 
-          <div className="w-1/3">
+          <div className="flex-1">
+            <label className="block text-sm text-gray-600 mb-1">Group Name (Optional)</label>
+            <input
+              type="text"
+              placeholder="e.g. Announcements"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="flex-1">
             <label className="block text-sm text-gray-600 mb-1">Visibility</label>
             <select
               value={visibility}
@@ -248,6 +282,56 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
               {isAdmin && <option value="global">Global (All Linked Users)</option>}
             </select>
           </div>
+        </div>
+
+        {/* Polling Options */}
+        <div className="border border-gray-200 rounded-md p-4 bg-gray-50">
+           <div className="flex items-center mb-3">
+              <input 
+                 type="checkbox" 
+                 id="isPoll" 
+                 checked={isPoll} 
+                 onChange={(e) => setIsPoll(e.target.checked)}
+                 className="mr-2"
+              />
+              <label htmlFor="isPoll" className="font-medium text-gray-700">Make this a Poll</label>
+           </div>
+           
+           {isPoll && (
+              <div className="ml-5 space-y-2">
+                 {pollOptions.map((opt, i) => (
+                    <div key={i} className="flex items-center space-x-2">
+                       <input
+                          type="text"
+                          placeholder={`Option ${i + 1}`}
+                          value={opt}
+                          onChange={(e) => {
+                             const newOpts = [...pollOptions];
+                             newOpts[i] = e.target.value;
+                             setPollOptions(newOpts);
+                          }}
+                          className="flex-1 px-3 py-1 border border-gray-300 rounded focus:border-blue-500 outline-none shadow-sm"
+                       />
+                       {i === pollOptions.length - 1 && (
+                          <button onClick={() => setPollOptions([...pollOptions, ''])} className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">+</button>
+                       )}
+                       {pollOptions.length > 2 && (
+                          <button onClick={() => setPollOptions(pollOptions.filter((_, idx) => idx !== i))} className="px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 text-sm">-</button>
+                       )}
+                    </div>
+                 ))}
+                 <div className="pt-2 flex items-center">
+                    <input 
+                       type="checkbox" 
+                       id="showResults" 
+                       checked={showPollResults} 
+                       onChange={(e) => setShowPollResults(e.target.checked)}
+                       className="mr-2"
+                    />
+                    <label htmlFor="showResults" className="text-sm text-gray-600">Show results to users after they vote</label>
+                 </div>
+              </div>
+           )}
         </div>
 
         <div className="flex items-center justify-between pt-2">

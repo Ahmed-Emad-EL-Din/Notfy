@@ -42,7 +42,7 @@ function AdminPanel({ isAdmin, onToggleAdmin, onSendNotification, users }: Admin
     }
   }
 
-  const generateInvitationLink = async () => {
+  const generateInvitationLink = async (role: 'user' | 'co-admin' = 'user') => {
     setIsGenerating(true)
     try {
       const fbToken = await auth.currentUser?.getIdToken() || 'local-debug-token'
@@ -51,7 +51,8 @@ function AdminPanel({ isAdmin, onToggleAdmin, onSendNotification, users }: Admin
         headers: { 
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${fbToken}`
-        }
+        },
+        body: JSON.stringify({ role })
       })
       if (res.ok) {
         const data = await res.json()
@@ -251,15 +252,23 @@ function AdminPanel({ isAdmin, onToggleAdmin, onSendNotification, users }: Admin
           <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 transform transition-all">
             <h3 className="text-xl font-bold text-gray-900 mb-6">Generate Secure Invite</h3>
             
-            <div className="space-y-5">
+            <div className="space-y-4">
               <button
-                onClick={generateInvitationLink}
+                 onClick={() => generateInvitationLink('user')}
+                 disabled={isGenerating}
+                 className="w-full px-4 py-3 font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition"
+              >
+                 Create User Link
+              </button>
+
+              <button
+                onClick={() => generateInvitationLink('co-admin')}
                 disabled={isGenerating}
                 className={`w-full px-4 py-3 font-medium text-white rounded-lg transition ${
                     isGenerating ? 'bg-indigo-400' : 'bg-indigo-600 hover:bg-indigo-700'
                 }`}
               >
-                {isGenerating ? 'Generating...' : 'Create Link'}
+                {isGenerating ? 'Generating...' : 'Create Co-Admin Link'}
               </button>
               
               {invitationLink && (

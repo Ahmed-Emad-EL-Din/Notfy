@@ -121,12 +121,14 @@ export const handler = async (event: any, context: any) => {
       const adminIds = userLinks.map(link => link.admin_id)
 
       // Get user's personal tasks OR tasks made by linked admins that are global
-      const tasks = await db.collection('tasks').find({
+      const tasksQuery = {
         $or: [
           { user_id: uid },
-          { user_id: { $in: adminIds }, visibility: 'global' }
+          { user_id: { $in: adminIds }, visibility: 'global' },
+          { visibility: 'global', primary_admin_id: { $in: adminIds } } // Co-admin created tasks linked to primary admins
         ]
-      }).sort({ due_date: 1 }).toArray()
+      }
+      const tasks = await db.collection('tasks').find(tasksQuery).sort({ created_at: -1 }).toArray()
       
       return { statusCode: 200, headers, body: JSON.stringify(tasks) }
     }
@@ -134,8 +136,13 @@ export const handler = async (event: any, context: any) => {
     if (action === 'addTask' && event.httpMethod === 'POST') {
       if (body.user_id !== uid) throw new Error('Unauthorized')
       
+      // If the user is a co-admin, their global tasks should technically sync up to their primary admin
+      // But we will allow them to just create tasks normally, and users linked to the primary admin will fetch them if we adjust getTasks
+      // Actually, if a task is 'global', user_id is the author. 
       const doc = {
         ...body,
+        reactions: body.reactions || {}, // { emoji: [user_ids] }
+        votes: body.votes || {}, // { optionIndex: [user_ids] }
         created_at: new Date().toISOString()
       }
       const result = await db.collection('tasks').insertOne(doc)
@@ -155,6 +162,67 @@ export const handler = async (event: any, context: any) => {
 
       await db.collection('tasks').updateOne({ _id: new ObjectId(id) }, { $set: updates })
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
+    if (action === 'reactTask' && event.httpMethod === 'POST') {
+        const { id, emoji } = body
+        if (!id || !emoji) throw new Error('ID and emoji are required')
+        // Simple toggle logic
+        const task = await db.collection('tasks').findOne({ _id: new ObjectId(id) })
+        if (!task) throw new Error('Task not found')
+
+        let reactions = task.reactions || {}
+        if (!reactions[emoji]) reactions[emoji] = []
+        
+        let arr = reactions[emoji]
+        if (arr.includes(uid)) {
+            arr = arr.filter((u: string) => u !== uid) // remove
+        } else {
+            arr.push(uid) // add
+        }
+        reactions[emoji] = arr
+
+        await db.collection('tasks').updateOne({ _id: new ObjectId(id) }, { $set: { reactions } })
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true, reactions }) }
+    }
+
+    if (action === 'voteTask' && event.httpMethod === 'POST') {
+        const { id, optionIndex, anonymous } = body
+        if (!id || optionIndex === undefined) throw new Error('ID and optionIndex are required')
+        
+        const task = await db.collection('tasks').findOne({ _id: new ObjectId(id) })
+        if (!task) throw new Error('Task not found')
+
+        let votes = task.votes || {}
+        
+        // Remove user from any previously voted option to enforce 1 vote per user
+        Object.keys(votes).forEach(opt => {
+             votes[opt] = votes[opt].filter((v: any) => v.uid !== uid)
+        })
+
+        if (!votes[optionIndex]) votes[optionIndex] = []
+        
+        votes[optionIndex].push({ uid, anonymous }) // anonymous boolean controls whether name is shown
+
+        await db.collection('tasks').updateOne({ _id: new ObjectId(id) }, { $set: { votes } })
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true, votes }) }
+    }
+
+    if (action === 'toggleMute' && event.httpMethod === 'POST') {
+        const { id } = body
+        if (!uid || !id) throw new Error('Unauthorized or no task id')
+        
+        const user = await db.collection('users').findOne({ id: uid })
+        let muted = user?.muted_tasks || []
+        
+        if (muted.includes(id)) {
+            muted = muted.filter((t: string) => t !== id)
+        } else {
+            muted.push(id)
+        }
+        
+        await db.collection('users').updateOne({ id: uid }, { $set: { muted_tasks: muted } })
+        return { statusCode: 200, headers, body: JSON.stringify({ success: true, muted_tasks: muted }) }
     }
 
     if (action === 'deleteTask' && event.httpMethod === 'DELETE') {
@@ -182,10 +250,12 @@ export const handler = async (event: any, context: any) => {
 
     if (action === 'generateInvite' && event.httpMethod === 'POST') {
       // Create a unique invite link for an admin
+      const { role } = body || { role: 'user' }
       const token = new ObjectId().toString()
       await db.collection('invites').insertOne({
         admin_id: uid,
         token: token,
+        role: role,
         created_at: new Date()
       })
       return { statusCode: 200, headers, body: JSON.stringify({ token }) }
@@ -196,11 +266,29 @@ export const handler = async (event: any, context: any) => {
       const invite = await db.collection('invites').findOne({ token })
       if (!invite) throw new Error('Invalid invite link')
       
+      const role = invite.role || 'user'
+      
       await db.collection('user_links').updateOne(
         { user_id: uid, admin_id: invite.admin_id },
-        { $set: { user_id: uid, admin_id: invite.admin_id, active: true, notifications_enabled: true } },
+        { $set: { user_id: uid, admin_id: invite.admin_id, active: true, notifications_enabled: true, role } },
         { upsert: true }
       )
+      
+      // If joining as co-admin, explicitly mark them as an admin in db as well
+      if (role === 'co-admin') {
+          await db.collection('users').updateOne(
+              { id: uid },
+              { $set: { is_admin: true, primary_admin_id: invite.admin_id } }
+          )
+      }
+      
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, role }) }
+    }
+
+    if (action === 'unlinkAdmin' && event.httpMethod === 'POST') {
+      const { admin_id } = body
+      if (!admin_id) throw new Error('admin_id is required')
+      await db.collection('user_links').deleteOne({ user_id: uid, admin_id })
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
     }
 

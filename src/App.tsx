@@ -11,12 +11,13 @@ import TaskEditor from './components/TaskEditor'
 // Update interfaces
 interface Task {
   id: string
-  title: string
-  description_html?: string
-  dueDate: Date
-  completed: boolean
-  userId: string
   visibility?: string
+  groupName?: string
+  type?: 'standard' | 'poll'
+  pollOptions?: string[]
+  showPollResults?: boolean
+  votes?: Record<number, Array<{uid: string, anonymous: boolean}>>
+  reactions?: Record<string, string[]>
 }
 
 interface AppNotification {
@@ -42,6 +43,7 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false)
   const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; isAdmin: boolean }>>([])
   const [isInitializing, setIsInitializing] = useState(true) // true while checking Firebase session
+  const [mutedTasks, setMutedTasks] = useState<string[]>([])
   
   // Link Handling state
   const [isProcessingInvite, setIsProcessingInvite] = useState(false)
@@ -149,7 +151,7 @@ function App() {
           const now = Date.now()
           const timeUntilDue = dueTime - now
           
-          if (!task.completed && timeUntilDue > 0) {
+          if (!task.completed && timeUntilDue > 0 && !mutedTasks.includes(task.id)) {
             const tag = `task-alarm-${task.id}`
 
             // The fallback function: sends exactly at due time if app is open,
@@ -254,10 +256,11 @@ function App() {
 
 
 
-  const fetchTasks = async () => {
-    if (!currentUser) return
+  const fetchTasks = async (overrideUserId?: string) => {
+    const targetUserId = overrideUserId || currentUser?.id;
+    if (!targetUserId) return
     const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
-    const res = await fetch(`/.netlify/functions/api?action=getTasks&userId=${currentUser.id}`, {
+    const res = await fetch(`/.netlify/functions/api?action=getTasks&userId=${targetUserId}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
     if (res.ok) {
@@ -269,7 +272,13 @@ function App() {
         dueDate: new Date(d.due_date),
         completed: d.completed,
         userId: d.user_id,
-        visibility: d.visibility || 'personal'
+        visibility: d.visibility || 'personal',
+        groupName: d.groupName,
+        type: d.type || 'standard',
+        pollOptions: d.pollOptions || [],
+        showPollResults: d.showPollResults !== undefined ? d.showPollResults : true,
+        reactions: d.reactions || {},
+        votes: d.votes || {}
       }))
       // Sort nearest first (due_date)
       setTasks(fetchedTasks.sort((a: Task, b: Task) => a.dueDate.getTime() - b.dueDate.getTime()))
@@ -280,7 +289,7 @@ function App() {
   useEffect(() => {
     const now = new Date()
     const upcoming = tasks
-      .filter(t => !t.completed && t.dueDate.getTime() > now.getTime())
+      .filter(t => !t.completed && t.dueDate.getTime() > now.getTime() && !mutedTasks.includes(t.id))
       .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
       .map(task => {
         const diffMs = task.dueDate.getTime() - now.getTime()
@@ -331,8 +340,9 @@ function App() {
             // Sync the actual admin status from DB
             setIsAdmin(dbUser.is_admin);
             setCurrentUser(prev => prev ? { ...prev, isAdmin: dbUser.is_admin } : prev);
+            setMutedTasks(dbUser.muted_tasks || []);
             
-            await fetchTasks()
+            await fetchTasks(user.id)
             
             // Load admin's linked users if admin
             if (dbUser.is_admin) {
@@ -456,6 +466,60 @@ function App() {
     }
   }
 
+  const handleToggleMute = async (taskId: string) => {
+    if (!currentUser) return;
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=toggleMute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id: taskId })
+    })
+    if (res.ok) {
+        const data = await res.json()
+        setMutedTasks(data.muted_tasks)
+    }
+  }
+
+  const handleReactTask = async (taskId: string, emoji: string) => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=reactTask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id: taskId, emoji })
+    })
+    if (res.ok) {
+        const data = await res.json()
+        setTasks(tasks.map(t => t.id === taskId ? { ...t, reactions: data.reactions } : t))
+    }
+  }
+
+  const handleVoteTask = async (taskId: string, optionIndex: number, anonymous: boolean) => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=voteTask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id: taskId, optionIndex, anonymous })
+    })
+    if (res.ok) {
+        const data = await res.json()
+        setTasks(tasks.map(t => t.id === taskId ? { ...t, votes: data.votes } : t))
+    }
+  }
+
+  const handleUnlinkAdmin = async () => {
+     const admin_id = prompt("Enter the ID of the Admin Workspace you want to unlink (found in invite link):");
+     if (admin_id) {
+         const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+         await fetch('/.netlify/functions/api?action=unlinkAdmin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ admin_id })
+         })
+         alert("Workspace Unlinked.");
+         window.location.reload();
+     }
+  }
+
   // Show a loading screen while Firebase checks for an existing session
   if (isInitializing) {
     return (
@@ -565,6 +629,9 @@ function App() {
                      </>
                    )}
 
+                   <button onClick={handleUnlinkAdmin} className="w-full text-left px-4 py-3 text-sm text-yellow-600 hover:bg-yellow-50 flex items-center border-b">
+                      <LogOut className="h-4 w-4 mr-2"/> Unlink Workspace
+                   </button>
                    <button onClick={handleDeleteAccount} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center">
                       <Trash2 className="h-4 w-4 mr-2"/> Delete Account
                    </button>
@@ -608,14 +675,25 @@ function App() {
                   />
               </div>
 
-              <div className="space-y-4">
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={`p-4 border rounded-xl shadow-sm transition-all ${
-                      task.completed ? 'bg-green-50/50 border-green-200 opacity-75' : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md'
-                    }`}
-                  >
+              <div className="space-y-8">
+                {Object.entries(
+                   tasks.reduce((acc, t) => {
+                       const g = t.groupName || 'Ungrouped Tasks';
+                       if (!acc[g]) acc[g] = [];
+                       acc[g].push(t);
+                       return acc;
+                   }, {} as Record<string, Task[]>)
+                ).map(([groupString, groupTasks]) => (
+                  <div key={groupString} className="space-y-4">
+                     <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider pl-2 border-l-4 border-blue-400">{groupString}</h3>
+                     
+                     {groupTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className={`p-4 border rounded-xl shadow-sm transition-all ${
+                          task.completed ? 'bg-green-50/50 border-green-200 opacity-75' : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md'
+                        }`}
+                      >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center space-x-3">
@@ -642,11 +720,70 @@ function App() {
                              dangerouslySetInnerHTML={{__html: task.description_html}}
                           />
                         )}
-                        <div className="flex items-center justify-between mt-4 ml-11">
-                          <p className="text-xs text-gray-500 font-medium bg-gray-100 inline-block px-2 py-1 rounded-md">
+                        
+                        {task.type === 'poll' && (
+                           <div className="mt-4 ml-11 bg-gray-50 border p-3 rounded-lg max-w-sm">
+                              <h4 className="text-sm font-semibold mb-2">Vote on Option:</h4>
+                              {task.pollOptions?.map((opt, idx) => {
+                                  const votedHere = task.votes && task.votes[idx] && task.votes[idx].some(v => v.uid === currentUser.id);
+                                  const totalVotes = task.votes ? Object.values(task.votes).reduce((acc, curr) => acc + curr.length, 0) : 0;
+                                  const optVotes = task.votes && task.votes[idx] ? task.votes[idx].length : 0;
+                                  const pct = totalVotes ? Math.round((optVotes / totalVotes) * 100) : 0;
+                        
+                                  return (
+                                     <div key={idx} className="mb-2">
+                                         <div className="flex items-center">
+                                            <input type="radio" 
+                                               name={`poll-${task.id}`} 
+                                               checked={votedHere || false}
+                                               onChange={() => {
+                                                   const isAnon = confirm("Vote anonymously? (Your name will be hidden from the admin)");
+                                                   handleVoteTask(task.id, idx, isAnon);
+                                               }}
+                                               className="mr-2 cursor-pointer"
+                                            />
+                                            <span className="text-sm cursor-pointer">{opt}</span>
+                                         </div>
+                                         {task.showPollResults && totalVotes > 0 && (
+                                             <div className="w-full bg-gray-200 h-1.5 mt-1.5 rounded-full overflow-hidden">
+                                                <div className="bg-blue-500 h-full" style={{ width: `${pct}%` }}></div>
+                                             </div>
+                                         )}
+                                         {task.showPollResults && <div className="text-xs text-gray-400 mt-1">{optVotes} votes ({pct}%)</div>}
+                                     </div>
+                                  )
+                              })}
+                           </div>
+                        )}
+                        
+                        <div className="ml-11 flex items-center space-x-2 mt-4 flex-wrap gap-y-2">
+                            {['👍', '❤️', '👀', '🔥'].map(emoji => {
+                                const reacted = task.reactions && task.reactions[emoji] && task.reactions[emoji].includes(currentUser.id);
+                                const count = task.reactions && task.reactions[emoji] ? task.reactions[emoji].length : 0;
+                                return (
+                                   <button 
+                                      key={emoji}
+                                      onClick={() => handleReactTask(task.id, emoji)}
+                                      className={`text-sm px-2.5 py-1 rounded-md transition duration-200 ease-in-out ${reacted ? 'bg-blue-100 text-blue-700 font-bold border border-blue-200 shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-transparent'}`}
+                                   >
+                                      {emoji} {count > 0 && <span className="ml-1 opacity-80">{count}</span>}
+                                   </button>
+                                )
+                            })}
+                        </div>
+                        
+                        <div className="flex items-center justify-between mt-5 ml-11 border-t pt-4 border-gray-100">
+                          <p className="text-xs text-gray-500 font-medium bg-gray-100/80 inline-block px-2.5 py-1.5 rounded-md flex items-center">
                             Due: {format(task.dueDate, 'MMM dd, yyyy HH:mm')}
                           </p>
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-1">
+                            <button 
+                                onClick={() => handleToggleMute(task.id)}
+                                className="text-gray-400 hover:text-yellow-500 transition-colors p-1.5 rounded-md hover:bg-yellow-50"
+                                title={mutedTasks.includes(task.id) ? "Unmute Notifications" : "Mute Notifications"}
+                            >
+                                {mutedTasks.includes(task.id) ? "🔕" : "🔔"}
+                            </button>
                             {(task.userId === currentUser.id || isAdmin) && (
                               <button
                                 onClick={() => handleEditTask(task)}
@@ -670,6 +807,8 @@ function App() {
                       </div>
                     </div>
                   </div>
+                ))}
+                </div>
                 ))}
                 
                 {tasks.length === 0 && (
