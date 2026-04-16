@@ -307,7 +307,7 @@ function App() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-2">
               <Bell className="h-8 w-8 text-blue-600" />
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Notfy</h1>
+              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">RelaySignal</h1>
             </div>
             
             <div className="flex items-center space-x-4">

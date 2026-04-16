@@ -1,6 +1,6 @@
-# Notfy Complete Configuration & Setup Guide
+# RelaySignal Complete Configuration & Setup Guide
 
-This document outlines every environmental variable and external service setting that needs to be configured for the full Notfy feature-set to work in production.
+This document outlines every environmental variable and external service setting that needs to be configured for the full RelaySignal feature-set to work in production.
 
 ## 1. VAPID Keys for Web Push Notifications
 For the Netlify Cron Job to deliver the offline/background notifications to Service Workers, you must provide VAPID keys.
@@ -16,7 +16,7 @@ For the Netlify Cron Job to deliver the offline/background notifications to Serv
 To allow tasks to save Voice Note audio recordings you need a place to put them. Firebase Storage gives a generous 5GB for free limits.
 
 1. Go to your [Firebase Console](https://console.firebase.google.com/).
-2. Select your Notfy project.
+2. Select your RelaySignal project.
 3. On the left sidebar, click **Storage** (Under "Build").
 4. Click **Get Started** and step through the initial prompts (Default region is fine).
 5. Once your storage bucket is created, click the **Rules** tab at the top of the Storage page.
