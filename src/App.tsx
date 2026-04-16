@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
@@ -59,7 +59,7 @@ function App() {
   // Editing State
   const [editingTask, setEditingTask] = useState<Task | null>(null)
 
-  const processingLogins = new Set<string>()
+  const processingLogins = useRef(new Set<string>())
 
   // Listen to Firebase Auth session — restores login on page refresh automatically
   useEffect(() => {
@@ -231,11 +231,11 @@ function App() {
                       // Browser feedback
                       alert("Successfully Connected to Telegram! ✅")
                   }
-                  setTelegramStatus(s => {
+                   setTelegramStatus(s => {
                      const newAttempts = s.polling ? s.attempts + 1 : s.attempts;
-                     const timeout = newAttempts >= 40; // Max 2 minutes polling (40x3s)
+                     const timeout = newAttempts >= 60; // Max 3 minutes polling (60x3s)
                      if (timeout && s.polling && !data.connected) {
-                          alert("Telegram connection timed out. Please try linking again.");
+                          alert("Telegram connection timed out. Please check if you really clicked 'Start' in the bot, then try linking again.");
                      }
                      return { 
                          ...s, 
@@ -316,8 +316,8 @@ function App() {
 
   const handleLogin = async (user: UserData) => {
     // Prevent redundant concurrent calls for the same user
-    if (processingLogins.has(user.id)) return
-    processingLogins.add(user.id)
+    if (processingLogins.current.has(user.id)) return
+    processingLogins.current.add(user.id)
 
     try {
         setCurrentUser(user)
@@ -360,7 +360,7 @@ function App() {
             }
         }
     } finally {
-        processingLogins.delete(user.id)
+        processingLogins.current.delete(user.id)
     }
   }
 
@@ -602,8 +602,13 @@ function App() {
                       <div className="border-b">
                         <button 
                           disabled={telegramStatus.polling}
-                          onClick={() => {
+                          onClick={async () => {
                              setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
+                             const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+                             fetch('/.netlify/functions/api?action=registerWebhook', {
+                                 method: 'POST',
+                                 headers: { 'Authorization': `Bearer ${token}` }
+                             }).catch(() => {});
                              window.location.href = `tg://resolve?domain=RelaySignals_bot&start=${currentUser.id}`;
                           }} 
                           className={`w-full text-left px-4 py-3 text-sm flex items-center ${telegramStatus.polling ? 'text-gray-400 bg-gray-50' : 'text-blue-600 hover:bg-blue-50'}`}

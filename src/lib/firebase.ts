@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -13,3 +13,8 @@ const firebaseConfig = {
 // Initialize only if keys exist, but we trick TypeScript so build passes without throwing
 export const app = firebaseConfig.apiKey ? initializeApp(firebaseConfig) : initializeApp({ apiKey: 'dummy' })
 export const auth = getAuth(app)
+
+// Ensure session persistence across browser restarts and mobile redirects
+if (firebaseConfig.apiKey) {
+  setPersistence(auth, browserLocalPersistence).catch(console.error);
+}

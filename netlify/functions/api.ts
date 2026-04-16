@@ -348,6 +348,21 @@ export const handler = async (event: any, context: any) => {
     }
 
     // Telegram Bot Integration endpoints
+    if (action === 'registerWebhook' && event.httpMethod === 'POST') {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
+      if (!botToken) throw new Error('Bot token missing');
+      
+      const host = event.headers.host || 'relaysignal.netlify.app';
+      const protocol = host.includes('localhost') ? 'http' : 'https';
+      const webhookUrl = `${protocol}://${host}/.netlify/functions/api?action=telegramWebhook`;
+      
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`);
+      const data = await res.json();
+      
+      console.log(`Webhook registered: ${webhookUrl}`, data);
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, data, url: webhookUrl }) };
+    }
+
     if (action === 'checkTelegramStatus' && event.httpMethod === 'GET') {
       if (!uid) throw new Error('Unauthorized')
       const user = await db.collection('users').findOne({ id: uid })
