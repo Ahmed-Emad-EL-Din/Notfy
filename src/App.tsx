@@ -405,7 +405,6 @@ function App() {
 
     if (res.ok) {
       if (isUpdate) {
-          // Update local state
           setTasks(tasks.map(t => t.id === taskObj.id ? { ...t, ...taskObj, dueDate: new Date(taskObj.due_date) } : t))
           setEditingTask(null)
           alert("Task updated successfully!")
@@ -420,12 +419,12 @@ function App() {
             userId: newTask.user_id,
             visibility: newTask.visibility
           }
-          // Sort after adding
           const newList = [...tasks, taskModel].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
           setTasks(newList)
       }
     } else {
-        alert("Failed to save task. Please try again.")
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to save task. Server Error: ${errData.error || res.statusText || 'Unknown'}`);
     }
   }
 
