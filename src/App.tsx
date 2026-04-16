@@ -599,27 +599,24 @@ function App() {
                 <div className="absolute right-0 top-full mt-2 w-56 bg-white max-h-0 overflow-hidden group-hover:max-h-60 transition-all duration-300 shadow-xl rounded-md border border-gray-100">
                    
                    {!telegramStatus.connected ? (
-                     <button 
-                       disabled={telegramStatus.polling}
-                       onClick={() => {
-                          setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
-                          // Native link is much faster than t.me redirect
-                          const nativeLink = `tg://resolve?domain=RelaySignals_bot&start=${currentUser.id}`;
-                          const webLink = `https://t.me/RelaySignals_bot?start=${currentUser.id}`;
-                          
-                          // Try to open the app directly
-                          window.location.href = nativeLink;
-                          
-                          // Fallback to web link in a new tab after a short delay if app didn't open
-                          setTimeout(() => {
-                            window.open(webLink, '_blank');
-                          }, 1000);
-                       }} 
-                       className={`w-full text-left px-4 py-3 text-sm flex items-center border-b ${telegramStatus.polling ? 'text-gray-400 bg-gray-50' : 'text-blue-600 hover:bg-blue-50'}`}
-                     >
-                        <Bell className={`h-4 w-4 mr-2 ${telegramStatus.polling ? 'animate-bounce' : ''}`}/> 
-                        <span>{telegramStatus.polling ? 'Waiting for Bot...' : 'Connect Telegram'}</span>
-                     </button>
+                      <div className="border-b">
+                        <button 
+                          disabled={telegramStatus.polling}
+                          onClick={() => {
+                             setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
+                             window.location.href = `tg://resolve?domain=RelaySignals_bot&start=${currentUser.id}`;
+                          }} 
+                          className={`w-full text-left px-4 py-3 text-sm flex items-center ${telegramStatus.polling ? 'text-gray-400 bg-gray-50' : 'text-blue-600 hover:bg-blue-50'}`}
+                        >
+                           <Bell className={`h-4 w-4 mr-2 ${telegramStatus.polling ? 'animate-bounce' : ''}`}/> 
+                           <span>{telegramStatus.polling ? 'Waiting for Bot...' : 'Connect Telegram App'}</span>
+                        </button>
+                        {telegramStatus.polling && (
+                          <div className="px-4 pb-3 text-[10px] text-gray-400">
+                             Didn't open? <a href={`https://t.me/RelaySignals_bot?start=${currentUser.id}`} target="_blank" className="text-blue-500 underline ml-1">Try the web version</a>
+                          </div>
+                        )}
+                      </div>
                    ) : (
                      <>
                         <div className="px-4 py-3 text-sm text-green-600 font-medium border-b flex items-center bg-green-50/50">
