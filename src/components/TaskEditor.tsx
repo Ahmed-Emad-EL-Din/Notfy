@@ -59,7 +59,9 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Support cross-browser formats — favor webm for Chrome, mp4 for Safari
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         stream.getTracks().forEach(t => t.stop()); // stop mic access
 
         const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
