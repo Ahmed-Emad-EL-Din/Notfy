@@ -12,10 +12,11 @@ import {
 
 interface AuthProps {
   onLogin: (user: any) => void
+  defaultToSignUp?: boolean
 }
 
-function Auth({ onLogin }: AuthProps) {
-  const [isLogin, setIsLogin] = useState(true)
+function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
+  const [isLogin, setIsLogin] = useState(!defaultToSignUp) // false = show Sign Up
   const [formData, setFormData] = useState({
     email: '',
     password: '',

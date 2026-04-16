@@ -3,6 +3,7 @@ import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2 } from 'luc
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
 import { auth } from './lib/firebase'
+import { onAuthStateChanged } from 'firebase/auth'
 import AdminPanel from './components/AdminPanel'
 import Auth from './components/Auth'
 import TaskEditor from './components/TaskEditor'
@@ -40,6 +41,7 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
   const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; isAdmin: boolean }>>([])
+  const [isInitializing, setIsInitializing] = useState(true) // true while checking Firebase session
   
   // Link Handling state
   const [isProcessingInvite, setIsProcessingInvite] = useState(false)
@@ -47,17 +49,33 @@ function App() {
   // Telegram State
   const [telegramStatus, setTelegramStatus] = useState({ checked: false, connected: false, polling: false, attempts: 0 })
 
+  // Listen to Firebase Auth session — restores login on page refresh automatically
   useEffect(() => {
-    if (!currentUser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      const localUser = {
-        id: 'local-admin-debug',
-        email: 'local@dev.com',
-        name: 'Local Developer',
-        isAdmin: true
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Firebase has an active session — restore it silently
+        await handleLogin({
+          id: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+          isAdmin: false // will be updated from MongoDB in handleLogin
+        })
+      } else if (isLocal) {
+        // Local dev bypass — only runs if Firebase has no session
+        await handleLogin({
+          id: 'local-admin-debug',
+          email: 'local@dev.com',
+          name: 'Local Developer',
+          isAdmin: true
+        }).catch(console.error)
       }
-      handleLogin(localUser).catch(console.error)
-    }
-  }, [currentUser])
+      setIsInitializing(false)
+    })
+
+    return () => unsubscribe()
+  }, [])
 
   // Handle Invitation Links (e.g. /invite/TOKEN)
   useEffect(() => {
@@ -340,9 +358,24 @@ function App() {
     }
   }
 
-  if (!currentUser) {
-    return <Auth onLogin={handleLogin} />
+  // Show a loading screen while Firebase checks for an existing session
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
+        <Bell className="h-12 w-12 text-blue-600 mb-4 animate-pulse" />
+        <p className="text-lg font-medium text-gray-600">Loading RelaySignal...</p>
+      </div>
+    )
   }
+
+  if (!currentUser) {
+    // If user has never visited before (no localStorage flag), show Sign Up by default
+    const hasVisitedBefore = !!localStorage.getItem('relaysignal_visited')
+    return <Auth onLogin={handleLogin} defaultToSignUp={!hasVisitedBefore} />
+  }
+
+  // Mark as visited once logged in
+  localStorage.setItem('relaysignal_visited', '1')
 
   if (isProcessingInvite) {
       return <div className="min-h-screen flex items-center justify-center bg-gray-100"><p className="text-xl">Linking to Admin Workspace...</p></div>
