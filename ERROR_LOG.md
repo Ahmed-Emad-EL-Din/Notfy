@@ -1,8 +1,22 @@
-# RelaySignal Bug & Solution Log
+## 8. Android Browser Login Loop
+**Symptoms:** 
+- Users on Android Chrome or In-App Browsers experience a loop where they login successfully but are flickered back to the login screen.
+**Root Cause:** 
+- `processingLogins` was reset on every render, failing to prevent concurrent auth event "clashes".
+- Mobile browsers clear transient session state faster, causing `onAuthStateChanged` to fire with `null` momentarily before the session is restored.
+**Solution:** 
+- Moved `processingLogins` to a `useRef` to properly deduplicate events.
+- Set explicit `browserLocalPersistence` in `firebase.ts` to ensure Android retains the session across redirects.
 
-This document tracks the critical bugs encountered during the final development and deployment phase, along with their root causes and technical resolutions.
-
-## 1. Netlify Production Build Failure
+## 9. Telegram Connection Timeout
+**Symptoms:** 
+- Frontend polling for `telegram_chat_id` reaches 2-minute limit without linking.
+**Root Cause:** 
+- Webhook URL was not always registered with Telegram's servers after deployment.
+- 2 minutes was occasionally insufficient for cold-starts/network delays.
+**Solution:** 
+- Implemented an automatic `registerWebhook` backend action that is triggered every time a user clicks "Connect Telegram".
+- Increased polling timeout to 3 minutes (60 attempts).
 **Symptoms:** 
 - Deployment logs showed `Command failed with exit code 2: npm run build`. 
 - `tsc` reported property missing errors on `Task` interface.
