@@ -19,10 +19,27 @@ const initializeFirebase = () => {
     if (serviceAccount) {
       let parsedCert;
       try {
+        // Attempt 1: Standard parse
         parsedCert = JSON.parse(serviceAccount);
       } catch (e) {
-        const cleaned = serviceAccount.trim().replace(/\\n/g, '\n');
-        parsedCert = JSON.parse(cleaned);
+        // Attempt 2: Aggressive sanitization
+        try {
+          // 1. Strip everything before the first { and after the last } (handles BOM/noise)
+          let cleaned = serviceAccount.trim();
+          const firstBrace = cleaned.indexOf('{');
+          const lastBrace = cleaned.lastIndexOf('}');
+          if (firstBrace !== -1 && lastBrace !== -1) {
+            cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+          }
+          
+          // 2. Remove actual physical newlines that break JSON.parse in some envs
+          // but preserve literal \n sequences if they exist
+          cleaned = cleaned.replace(/\r?\n|\r/g, " ");
+          
+          parsedCert = JSON.parse(cleaned);
+        } catch (e2: any) {
+          throw new Error(`Robust JSON parsing failed. First 20 chars: "${serviceAccount.substring(0, 20)}". Error: ${e2.message}`);
+        }
       }
       admin.initializeApp({
         credential: admin.credential.cert(parsedCert)
