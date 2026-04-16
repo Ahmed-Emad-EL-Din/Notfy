@@ -26,6 +26,7 @@ function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [verificationSent, setVerificationSent] = useState(false)
+  const [selectedRole, setSelectedRole] = useState<'user' | 'admin'>('user')
 
   // Friendly error messages instead of raw Firebase codes
   const getFriendlyError = (err: any): string => {
@@ -48,24 +49,14 @@ function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
   const handleAuthResult = async (userCredential: any, isNewSignup = false) => {
     const user = userCredential.user
 
-    // Only send verification email on first signup, not on every login
-    if (isNewSignup && user.providerData[0]?.providerId === 'password' && !user.emailVerified) {
-      await sendEmailVerification(user)
-      setVerificationSent(true)
-      return
-    }
-
-    // If user signed up but hasn't verified email yet and tries to log in again
-    if (!isNewSignup && user.providerData[0]?.providerId === 'password' && !user.emailVerified) {
-      setError('Please verify your email first. Check your inbox for the verification link.')
-      return
-    }
-
+    // Email verification check disabled to prevent redirect loops.
+    // Users can now enter the app immediately after signup.
+    
     onLogin({
       id: user.uid,
       email: user.email,
       name: user.displayName || formData.name || user.email?.split('@')[0] || 'User',
-      isAdmin: false
+      isAdmin: isNewSignup ? (selectedRole === 'admin') : false // Role is only picked during new signup
     })
   }
 
@@ -246,22 +237,56 @@ function Auth({ onLogin, defaultToSignUp = false }: AuthProps) {
           </div>
 
           {!isLogin && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Confirm Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                <input
-                  type="password"
-                  placeholder="Confirm your password"
-                  value={formData.confirmPassword}
-                  onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                  <input
+                    type="password"
+                    placeholder="Confirm your password"
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
+                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
               </div>
-            </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 mt-4">
+                  Join as
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRole('user')}
+                    className={`p-3 border rounded-lg text-sm transition-all text-center ${
+                      selectedRole === 'user' 
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200' 
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="font-bold mb-0.5 text-xs">Regular User</div>
+                    <div className="text-[10px] opacity-70">Personal tasks</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRole('admin')}
+                    className={`p-3 border rounded-lg text-sm transition-all text-center ${
+                      selectedRole === 'admin' 
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200' 
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="font-bold mb-0.5 text-xs">Admin</div>
+                    <div className="text-[10px] opacity-70">Team tasks</div>
+                  </button>
+                </div>
+              </div>
+            </>
           )}
 
           <button
