@@ -338,8 +338,14 @@ export const handler = async (event: any, context: any) => {
     }
 
     if (action === 'generateInvite' && event.httpMethod === 'POST') {
-      // Create a unique invite link for an admin
       const { role } = body || { role: 'user' }
+      
+      // Reuse existing invite if any
+      const existing = await db.collection('invites').findOne({ admin_id: uid, role: role })
+      if (existing) {
+          return { statusCode: 200, headers, body: JSON.stringify({ token: existing.token }) }
+      }
+
       const token = new ObjectId().toString()
       await db.collection('invites').insertOne({
         admin_id: uid,

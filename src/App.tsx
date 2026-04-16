@@ -646,11 +646,11 @@ function App() {
                   <button
                     onClick={handleGenerateInvite}
                     disabled={isGeneratingInvite}
-                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 transition text-sm sm:text-base disabled:opacity-50"
+                    className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 transition text-xs sm:text-sm md:text-base disabled:opacity-50"
                     title="Copy Invite Link"
                   >
                     <Link className="h-4 w-4" />
-                    <span className="hidden sm:inline">{isGeneratingInvite ? 'Generating...' : 'Invite Users'}</span>
+                    <span>{isGeneratingInvite ? 'Generating...' : 'Invite Users'}</span>
                   </button>
                   
                   <button
@@ -775,6 +775,27 @@ function App() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
             <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 ${activeTab !== 'tasks' ? 'hidden lg:block' : ''}`}>
+              
+              {isAdmin && users.length === 0 && (
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mb-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center">
+                    <div className="bg-blue-100 p-3 rounded-full mr-4">
+                      <Link className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-blue-900 font-bold">Grow your audience!</h4>
+                      <p className="text-blue-700 text-sm">You haven't linked any users yet. Share your link to start sending global alerts.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleGenerateInvite}
+                    className="whitespace-nowrap px-6 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition shadow-sm"
+                  >
+                     Generate Invite Link
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-gray-800 flex items-center">
                   <Calendar className="h-5 w-5 mr-2 text-blue-500" />
