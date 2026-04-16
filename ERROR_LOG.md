@@ -5,77 +5,31 @@ This document tracks the critical bugs encountered during the final development 
 ## 1. Netlify Production Build Failure
 **Symptoms:** 
 - Deployment logs showed `Command failed with exit code 2: npm run build`. 
-- `tsc` (TypeScript Compiler) reported 30+ errors stating properties like `title`, `dueDate`, and `completed` do not exist on type `Task`.
+- `tsc` reported property missing errors on `Task` interface.
+**Solution:** Restored missing properties to `Task` interface in `src/App.tsx`.
 
-**Root Cause:**
-While adding new features (Polls, Grouping, Reactions), the `Task` interface in `src/App.tsx` was accidentally replaced with a partial interface that only contained the *new* properties, effectively "deleting" the standard task fields from the eyes of the compiler.
-
-**Solution:**
-- Restored the missing standard properties to the `Task` interface in `src/App.tsx`.
-- Removed an unused `auth` variable in `src/__tests__/App.test.tsx` that was causing a linting error.
-
----
-
-## 2. "Failed to Save Task" (API Rejection)
-**Symptoms:**
-- The frontend dashboard loaded correctly, but clicking "Save Task" resulted in an alert: `Failed to save task. Server Error: Unauthorized: Invalid token`.
-
-**Root Cause:**
-The `FIREBASE_SERVICE_ACCOUNT` environment variable was entered into the Netlify Dashboard as a multiline JSON block. The Node.js `JSON.parse` function was failing because it was only receiving the first line (`{`) of the string, causing the Firebase Admin SDK to crash before it could verify any user tokens.
-
-**Solution:**
-Implemented a **Robust JSON Parser** in `netlify/functions/api.ts`. The new logic:
-- Attempts a standard `JSON.parse` first.
-- If it fails, it applies a `.trim()` and `.replace(/\\n/g, '\n')` cleanup to the string before trying again.
-- This ensures the Service Account initializes correctly even if the environment variable formatting is unconventional.
-
----
+## 2. API "Unauthorized: Invalid token"
+**Symptoms:** "Failed to save task" alert on production.
+**Root Cause:** Multiline JSON parsing issues in the environment variables.
+**Solution:** Implemented robust JSON parsing in `netlify/functions/api.ts`.
 
 ## 3. Telegram Linkage Timeout
-**Symptoms:**
-- Clicking "Connect Telegram" and hitting "Start" in the bot resulted in an infinite waiting state on the website that eventually timed out.
-
-**Root Cause:**
-This was a secondary symptom of **Error #2**. Because the Firebase Admin SDK was failing to initialize, the `checkTelegramStatus` and `telegramWebhook` endpoints were also crashing. The frontend was polling the database, but the backend couldn't update the `telegram_chat_id` due to the initialization crash.
-
-**Solution:**
-Fixed via the **Robust JSON Parser** implementation in `api.ts`. Verified the fix using a Telegram Webhook simulation script (`test_telegram_webhook.mjs`).
-
----
+**Symptoms:** Infinite loading when connecting to bot.
+**Solution:** Fixed backend initialization crash (Error #2) and verified webhook logic.
 
 ## 4. Initial Login Dashboard Race Condition
-**Symptoms:**
-- New users signing up for the first time were occasionally seeing a blank dashboard even after a successful login.
-
-**Root Cause:**
-The `fetchTasks` function was relying on the `currentUser` state variable. Due to React's asynchronous state updates, `fetchTasks` was sometimes firing *before* `currentUser` was finished being set, leading it to exit early.
-
-**Solution:**
-Updated the `fetchTasks` signature to accept an optional `overrideUserId`. In the `handleLogin` flow, we now pass the user ID directly from the login response to ensure the first fetch is always successful regardless of state timing.
-
----
+**Symptoms:** Blank dashboard on first login.
+**Solution:** Passed `overrideUserId` to `fetchTasks` in the login flow.
 
 ## 5. Firebase Auth-Domain Configuration Missing
-**Symptoms:**
-- Login attempts failed with an `auth/auth-domain-config-required` error.
+**Symptoms:** `auth/auth-domain-config-required` error.
+**Solution:** Added `VITE_FIREBASE_AUTH_DOMAIN` to client config and Netlify.
 
-**Root Cause:**
-The `authDomain` property was missing from the Firebase client configuration, preventing Google and Email OAuth redirects.
+## 6. Truncated Service Account Variable
+**Symptoms:** `app/no-app` error and JSON syntax error at position 1.
+**Solution:** Added truncation detection and auto-fallback to `VITE_FIREBASE_PROJECT_ID` initialization.
 
-**Solution:**
-Updated `.env` and `src/lib/firebase.ts` to include the `VITE_VITE_FIREBASE_AUTH_DOMAIN` variable and confirmed it was added to the Netlify production variables. 
-
----
-
-## 6. Truncated Service Account Environment Variable
-**Symptoms:**
-- Server Error: `Firebase Admin Initialization Failed: Robust JSON parsing failed. First 20 chars: "{". Error: Expected property name or '}' in JSON at position 1 (line 1 column 2)`.
-
-**Root Cause:**
-On the Netlify Dashboard, when a JSON block is pasted into an environment variable field as multiple lines, the injection process sometimes only provide the first line to the serverless function. The backend receives an incomplete fragment (just `{`), which is invalid JSON.
-
-**Solution:**
-Implemented a double-safety initialization strategy in `netlify/functions/api.ts`:
-1.  **Truncation Detection**: The code now checks the length of the string. If it's suspiciously short (less than 100 characters), it identifies the variable as "broken."
-2.  **Auto-Fallback**: Instead of crashing, the backend now gracefully ignores the broken JSON fragment and falls back to initializing via `VITE_FIREBASE_PROJECT_ID` only. 
-3.  **Result**: The app remains functional and secure even if the Dashboard configuration is truncated.
+## 7. Hanging Telegram Redirect
+**Symptoms:** Clicking "Connect Telegram" took a long time to open or hung on a web redirect.
+**Root Cause:** `t.me` redirects rely on browser protocols that can be slow or fail on some devices.
+**Solution:** Updated `App.tsx` to use the **`tg://` direct protocol** for instant app launching, with a 1-second `t.me` fallback for web clients.
