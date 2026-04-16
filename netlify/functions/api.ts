@@ -233,6 +233,34 @@ export const handler = async (event: any, context: any) => {
       return { statusCode: 200, headers, body: JSON.stringify({ connected: !!user?.telegram_chat_id }) }
     }
 
+    if (action === 'testTelegram' && event.httpMethod === 'POST') {
+      if (!uid) throw new Error('Unauthorized')
+      const user = await db.collection('users').findOne({ id: uid })
+      if (!user || !user.telegram_chat_id) throw new Error('Telegram not connected')
+      
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
+      if (botToken) {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+             chat_id: user.telegram_chat_id,
+             text: '🔔 Test Notification from Notfy! Your connection is working perfectly. 🚀'
+          })
+        })
+      }
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
+    if (action === 'disconnectTelegram' && event.httpMethod === 'POST') {
+      if (!uid) throw new Error('Unauthorized')
+      await db.collection('users').updateOne(
+        { id: uid },
+        { $unset: { telegram_chat_id: "", telegram_updated_at: "" } }
+      )
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
     if (action === 'telegramWebhook' && event.httpMethod === 'POST') {
       try {
         const update = body;

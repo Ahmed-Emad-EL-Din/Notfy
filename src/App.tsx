@@ -210,23 +210,24 @@ function App() {
              })
                  if (res.ok) {
                  const data = await res.json()
-                 if (data.connected && telegramStatus.polling) {
-                     alert("Connected successfully to Telegram!")
-                 }
-                 setTelegramStatus(s => {
-                    const newAttempts = s.polling ? s.attempts + 1 : s.attempts;
-                    const timeout = newAttempts >= 20; // Max 1 minute polling (20x3s)
-                    if (timeout && s.polling && !data.connected) {
-                         alert("Telegram connection timed out to save server resources. Please try connecting again when ready.");
-                    }
-                    return { 
-                        ...s, 
-                        checked: true, 
-                        connected: data.connected, 
-                        polling: data.connected || timeout ? false : s.polling,
-                        attempts: timeout ? 0 : newAttempts
-                    }
-                 })
+                  if (data.connected && telegramStatus.polling) {
+                      // Browser feedback
+                      alert("Successfully Connected to Telegram! ✅")
+                  }
+                  setTelegramStatus(s => {
+                     const newAttempts = s.polling ? s.attempts + 1 : s.attempts;
+                     const timeout = newAttempts >= 40; // Max 2 minutes polling (40x3s)
+                     if (timeout && s.polling && !data.connected) {
+                          alert("Telegram connection timed out. Please try linking again.");
+                     }
+                     return { 
+                         ...s, 
+                         checked: true, 
+                         connected: data.connected, 
+                         polling: data.connected || timeout ? false : s.polling,
+                         attempts: timeout ? 0 : newAttempts
+                     }
+                  })
              }
           } catch(e) {}
       }
@@ -422,6 +423,28 @@ function App() {
     return <Auth onLogin={handleLogin} defaultToSignUp={!hasVisitedBefore} />
   }
 
+  const handleTestTelegram = async () => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=testTelegram', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) alert("Test message sent! Check your Telegram.")
+  }
+
+  const handleDisconnectTelegram = async () => {
+    if (!confirm("Disconnect Telegram notifications?")) return
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=disconnectTelegram', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+        setTelegramStatus(s => ({ ...s, connected: false }))
+        alert("Telegram disconnected.")
+    }
+  }
+
   // Mark as visited once logged in
   localStorage.setItem('relaysignal_visited', '1')
 
@@ -460,20 +483,37 @@ function App() {
                    
                    {!telegramStatus.connected ? (
                      <button 
+                       disabled={telegramStatus.polling}
                        onClick={() => {
                           setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
-                          // Note: Needs bot username configured below! Replace YOUR_BOT_USERNAME
                           window.open(`https://t.me/RelaySignals_bot?start=${currentUser.id}`, '_blank')
                        }} 
-                       className="w-full text-left px-4 py-3 text-sm text-blue-600 hover:bg-blue-50 flex items-center border-b"
+                       className={`w-full text-left px-4 py-3 text-sm flex items-center border-b ${telegramStatus.polling ? 'text-gray-400 bg-gray-50' : 'text-blue-600 hover:bg-blue-50'}`}
                      >
-                        <Bell className="h-4 w-4 mr-2"/> 
-                        {telegramStatus.polling ? 'Connecting...' : 'Connect Telegram'}
+                        <Bell className={`h-4 w-4 mr-2 ${telegramStatus.polling ? 'animate-bounce' : ''}`}/> 
+                        <span>{telegramStatus.polling ? 'Waiting for Bot...' : 'Connect Telegram'}</span>
                      </button>
                    ) : (
-                     <div className="w-full px-4 py-3 text-sm text-green-600 flex items-center border-b bg-green-50">
-                        <CheckCircle className="h-4 w-4 mr-2"/> Telegram Active
-                     </div>
+                     <>
+                        <div className="px-4 py-3 text-sm text-green-600 font-medium border-b flex items-center bg-green-50/50">
+                           <CheckCircle className="h-4 w-4 mr-2" />
+                           Telegram Linked
+                        </div>
+                        <button 
+                           onClick={handleTestTelegram}
+                           className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center border-b"
+                        >
+                           <Bell className="h-4 w-4 mr-2 text-blue-500"/> 
+                           Send Test Notification
+                        </button>
+                        <button 
+                           onClick={handleDisconnectTelegram}
+                           className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center border-b"
+                        >
+                           <Trash2 className="h-4 w-4 mr-2"/> 
+                           Disconnect Telegram
+                        </button>
+                     </>
                    )}
 
                    <button onClick={handleDeleteAccount} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center">
