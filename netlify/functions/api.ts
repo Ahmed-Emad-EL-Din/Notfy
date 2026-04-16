@@ -5,35 +5,36 @@ const uri = process.env.VITE_MONGODB_URI
 let cachedClient: MongoClient | null = null
 
 // Initialize Firebase Admin for token verification
-if (!admin.apps.length) {
+const initializeFirebase = () => {
+  if (admin.apps.length) return;
+
   const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
   const projectId = process.env.VITE_FIREBASE_PROJECT_ID
 
+  if (!serviceAccount && !projectId) {
+    throw new Error('Firebase Admin Configuration Missing: Both FIREBASE_SERVICE_ACCOUNT and VITE_FIREBASE_PROJECT_ID are undefined in the environment.');
+  }
+
   try {
     if (serviceAccount) {
-      // In some environments, the JSON might be wrapped in extra quotes or have escaped newlines
       let parsedCert;
       try {
         parsedCert = JSON.parse(serviceAccount);
       } catch (e) {
-        // Fallback: Try to handle multiline or escaped strings if JSON.parse fails
-        console.warn("Standard JSON.parse failed for FIREBASE_SERVICE_ACCOUNT, attempting cleanup...");
         const cleaned = serviceAccount.trim().replace(/\\n/g, '\n');
         parsedCert = JSON.parse(cleaned);
       }
-
       admin.initializeApp({
         credential: admin.credential.cert(parsedCert)
       })
-      console.log("Firebase Admin initialized successfully.");
-    } else if (projectId) {
+    } else {
       admin.initializeApp({
         projectId: projectId
       })
-      console.log("Firebase Admin initialized with projectId only.");
     }
+    console.log("Firebase Admin initialized successfully.");
   } catch (e: any) {
-    console.error("Firebase admin init error:", e.message)
+    throw new Error(`Firebase Admin Initialization Failed: ${e.message}`);
   }
 }
 
@@ -49,6 +50,7 @@ async function connectToDatabase() {
 
 // Middleware to verify Firebase JWT
 async function verifyAuth(event: any) {
+  initializeFirebase();
   const authHeader = event.headers.authorization || event.headers.Authorization
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('Unauthorized: Missing Auth Header')
