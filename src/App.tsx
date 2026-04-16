@@ -586,12 +586,23 @@ function App() {
   }
 
   const handleTestTelegram = async () => {
-    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
-    const res = await fetch('/.netlify/functions/api?action=testTelegram', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    if (res.ok) alert("Test message sent! Check your Telegram.")
+    try {
+      const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+      const res = await fetch('/.netlify/functions/api?action=testTelegram', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        let msg = "Test Notification Results:\n"
+        msg += data.telegram ? "✅ Telegram: SENT\n" : "❌ Telegram: NOT CONNECTED\n"
+        msg += data.browser ? "✅ Browser: SENT\n" : "❌ Browser: NO SUBSCRIPTION\n"
+        alert(msg)
+      }
+    } catch (err) {
+      console.error(err)
+      alert("Test failed. Check console.")
+    }
   }
 
   const handleDisconnectTelegram = async () => {

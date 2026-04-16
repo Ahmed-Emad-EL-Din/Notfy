@@ -432,21 +432,36 @@ export const handler = async (event: any, context: any) => {
 
     if (action === 'testTelegram' && event.httpMethod === 'POST') {
       if (!uid) throw new Error('Unauthorized')
-      const user = await db.collection('users').findOne({ id: uid })
-      if (!user || !user.telegram_chat_id) throw new Error('Telegram not connected')
       
+      const user = await db.collection('users').findOne({ id: uid })
       const botToken = process.env.TELEGRAM_BOT_TOKEN;
-      if (botToken) {
+
+      // 1. Send Telegram Test
+      if (user?.telegram_chat_id && botToken) {
         await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
              chat_id: user.telegram_chat_id,
-             text: '🔔 Test Notification from Notfy! Your connection is working perfectly. 🚀'
+             text: '🔔 Test Notification from Notfy! Your Telegram connection is working perfectly. 🚀'
           })
+        }).catch(() => {})
+      }
+      
+      // 2. Send Browser Web Push Test
+      const subscriptions = await db.collection('push_subscriptions').find({ user_id: uid }).toArray()
+      for (const sub of subscriptions) {
+        const payload = JSON.stringify({
+          title: 'Notfy Test Alert',
+          body: 'Your browser notifications are working correctly! ✅'
+        })
+        webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, payload).catch(err => {
+          if (err.statusCode === 410) db.collection('push_subscriptions').deleteOne({ _id: sub._id })
+          console.error("Test Web Push Error:", err)
         })
       }
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, telegram: !!user?.telegram_chat_id, browser: subscriptions.length > 0 }) }
     }
 
     if (action === 'disconnectTelegram' && event.httpMethod === 'POST') {
