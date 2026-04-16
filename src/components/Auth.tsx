@@ -6,8 +6,7 @@ import {
   getRedirectResult,
   GoogleAuthProvider, 
   createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  sendEmailVerification 
+  signInWithEmailAndPassword
 } from 'firebase/auth'
 
 interface AuthProps {

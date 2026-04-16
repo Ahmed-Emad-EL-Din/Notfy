@@ -108,7 +108,8 @@ export const handler = async (event: any, context: any) => {
         { $set: { id, email, name, is_admin, updated_at: new Date() } },
         { upsert: true }
       )
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+      const user = await db.collection('users').findOne({ id })
+      return { statusCode: 200, headers, body: JSON.stringify(user) }
     }
     
     if (action === 'getTasks' && event.httpMethod === 'GET') {
@@ -144,25 +145,29 @@ export const handler = async (event: any, context: any) => {
 
     if (action === 'updateTask' && event.httpMethod === 'PUT') {
       const { id, ...updates } = body
-      const existingTask = await db.collection('tasks').findOne({ _id: id })
+      if (!id) throw new Error('ID is required')
+      
+      const existingTask = await db.collection('tasks').findOne({ _id: new ObjectId(id) })
       if (!existingTask) throw new Error('Task not found')
       
       // Task owners AND admins can edit
       if (existingTask.user_id !== uid && !userIsAdmin) throw new Error('Unauthorized')
 
-      await db.collection('tasks').updateOne({ _id: id }, { $set: updates })
+      await db.collection('tasks').updateOne({ _id: new ObjectId(id) }, { $set: updates })
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
     }
 
     if (action === 'deleteTask' && event.httpMethod === 'DELETE') {
       const { id } = body
-      const existingTask = await db.collection('tasks').findOne({ _id: id })
+      if (!id) throw new Error('ID is required')
+      
+      const existingTask = await db.collection('tasks').findOne({ _id: new ObjectId(id) })
       if (!existingTask) throw new Error('Task not found')
       
       // Task owners AND admins can delete
       if (existingTask.user_id !== uid && !userIsAdmin) throw new Error('Unauthorized')
 
-      await db.collection('tasks').deleteOne({ _id: id })
+      await db.collection('tasks').deleteOne({ _id: new ObjectId(id) })
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
     }
 

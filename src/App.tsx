@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2 } from 'lucide-react'
+import { Bell, Calendar, User, Settings, CheckCircle, LogOut, Trash2, Pencil } from 'lucide-react'
 import { format, isTomorrow } from 'date-fns'
 import { subscribeUserToPush } from './lib/pushSubscription'
 import { auth } from './lib/firebase'
@@ -48,6 +48,9 @@ function App() {
   
   // Telegram State
   const [telegramStatus, setTelegramStatus] = useState({ checked: false, connected: false, polling: false, attempts: 0 })
+  
+  // Editing State
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
 
   // Listen to Firebase Auth session — restores login on page refresh automatically
   useEffect(() => {
@@ -297,7 +300,7 @@ function App() {
     subscribeUserToPush(user.id)
     
     const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
-    await fetch('/.netlify/functions/api?action=upsertUser', {
+    const upsertRes = await fetch('/.netlify/functions/api?action=upsertUser', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
@@ -310,17 +313,24 @@ function App() {
         is_admin: user.isAdmin
       })
     })
-    
-    await fetchTasks()
-    
-    // Load admin's linked users if admin
-    if (user.isAdmin) {
-       const userRes = await fetch(`/.netlify/functions/api?action=getLinkedUsers`, {
-         headers: { 'Authorization': `Bearer ${token}` }
-       })
-       if (userRes.ok) {
-         setUsers(await userRes.json())
-       }
+
+    if (upsertRes.ok) {
+        const dbUser = await upsertRes.json();
+        // Sync the actual admin status from DB
+        setIsAdmin(dbUser.is_admin);
+        setCurrentUser(prev => prev ? { ...prev, isAdmin: dbUser.is_admin } : prev);
+        
+        await fetchTasks()
+        
+        // Load admin's linked users if admin
+        if (dbUser.is_admin) {
+           const userRes = await fetch(`/.netlify/functions/api?action=getLinkedUsers`, {
+             headers: { 'Authorization': `Bearer ${token}` }
+           })
+           if (userRes.ok) {
+             setUsers(await userRes.json())
+           }
+        }
     }
   }
 
@@ -349,25 +359,56 @@ function App() {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ ...taskPayload, user_id: currentUser.id })
+  const handleCreateTaskObj = async (taskObj: any) => {
+    if (!currentUser) return
+    const idToken = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    
+    // If we have an ID, it's an update (PUT), otherwise it's a create (POST)
+    const isUpdate = !!taskObj.id
+    const action = isUpdate ? 'updateTask' : 'addTask'
+    const method = isUpdate ? 'PUT' : 'POST'
+
+    const res = await fetch(`/.netlify/functions/api?action=${action}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`
+      },
+      body: JSON.stringify({
+        ...taskObj,
+        user_id: currentUser.id
       })
-      if (res.ok) {
-        const data = await res.json()
-        const newTask: Task = {
-          id: data._id,
-          title: data.title,
-          description_html: data.description_html,
-          dueDate: new Date(data.due_date),
-          completed: data.completed,
-          userId: data.user_id,
-          visibility: data.visibility || 'personal'
-        }
-        // Add and keep sorted
-        setTasks(prev => [...prev, newTask].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime()))
+    })
+
+    if (res.ok) {
+      if (isUpdate) {
+          // Update local state
+          setTasks(tasks.map(t => t.id === taskObj.id ? { ...t, ...taskObj, dueDate: new Date(taskObj.due_date) } : t))
+          setEditingTask(null)
+          alert("Task updated successfully!")
+      } else {
+          const newTask = await res.json()
+          const taskModel = {
+            id: newTask._id,
+            title: newTask.title,
+            description_html: newTask.description_html,
+            dueDate: new Date(newTask.due_date),
+            completed: newTask.completed,
+            userId: newTask.user_id,
+            visibility: newTask.visibility
+          }
+          // Sort after adding
+          const newList = [...tasks, taskModel].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+          setTasks(newList)
       }
+    } else {
+        alert("Failed to save task. Please try again.")
     }
+  }
+
+  const handleEditTask = (task: Task) => {
+    setEditingTask(task)
+    document.getElementById('task-editor')?.scrollIntoView({ behavior: 'smooth' })
   }
 
   const toggleTaskCompletion = async (taskId: string) => {
@@ -551,7 +592,12 @@ function App() {
               </div>
 
               <div className="mb-8">
-                 <TaskEditor onSave={handleCreateTaskObj} isAdmin={isAdmin} />
+                  <TaskEditor 
+                    onSave={handleCreateTaskObj} 
+                    isAdmin={isAdmin} 
+                    initialTask={editingTask}
+                    onCancel={() => setEditingTask(null)}
+                  />
               </div>
 
               <div className="space-y-4">
@@ -592,15 +638,26 @@ function App() {
                           <p className="text-xs text-gray-500 font-medium bg-gray-100 inline-block px-2 py-1 rounded-md">
                             Due: {format(task.dueDate, 'MMM dd, yyyy HH:mm')}
                           </p>
-                          {(task.userId === currentUser.id || isAdmin) && (
-                            <button
-                              onClick={() => handleDeleteTask(task.id)}
-                              className="text-gray-400 hover:text-red-500 transition-colors p-1"
-                              title="Delete task"
-                            >
-                              <Trash2 className="h-5 w-5" />
-                            </button>
-                          )}
+                          <div className="flex items-center space-x-2">
+                            {(task.userId === currentUser.id || isAdmin) && (
+                              <button
+                                onClick={() => handleEditTask(task)}
+                                className="text-gray-400 hover:text-blue-500 transition-colors p-1"
+                                title="Edit task"
+                              >
+                                <Pencil className="h-5 w-5" />
+                              </button>
+                            )}
+                            {(task.userId === currentUser.id || isAdmin) && (
+                              <button
+                                onClick={() => handleDeleteTask(task.id)}
+                                className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                                title="Delete task"
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

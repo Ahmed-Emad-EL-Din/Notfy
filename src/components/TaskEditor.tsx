@@ -6,9 +6,11 @@ import { Mic, Square, Save } from 'lucide-react';
 interface TaskEditorProps {
   onSave: (task: any) => void;
   isAdmin: boolean;
+  initialTask?: any;
+  onCancel?: () => void;
 }
 
-const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin }) => {
+const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, onCancel }) => {
   const [title, setTitle] = useState('');
   const [descriptionHtml, setDescriptionHtml] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -20,6 +22,29 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin }) => {
   const quillRef = useRef<ReactQuill>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+
+  // Populate form when editing
+  React.useEffect(() => {
+    if (initialTask) {
+        setTitle(initialTask.title || '');
+        setDescriptionHtml(initialTask.description_html || '');
+        // Convert Date to datetime-local format (YYYY-MM-DDTHH:mm)
+        if (initialTask.dueDate) {
+            const date = new Date(initialTask.dueDate);
+            const formatted = date.toISOString().slice(0, 16);
+            setDueDate(formatted);
+        }
+        setVisibility(initialTask.visibility || 'personal');
+        setVoiceNoteUrl(initialTask.voiceNoteUrl || initialTask.voice_note_url || null);
+    } else {
+        // Reset if we stop editing
+        setTitle('');
+        setDescriptionHtml('');
+        setDueDate('');
+        setVisibility('personal');
+        setVoiceNoteUrl(null);
+    }
+  }, [initialTask]);
 
   // ---- Voice Recording ----
   const startRecording = async () => {
@@ -148,25 +173,28 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin }) => {
   const handleSave = () => {
     if (!title.trim() || isUploadingImage || isUploadingAudio) return;
     onSave({
+      id: initialTask?.id, // include ID if editing
       title,
       description_html: descriptionHtml,
       due_date: new Date(dueDate || Date.now()).toISOString(),
-      completed: false,
+      completed: initialTask?.completed || false,
       visibility,
       type: 'standard',
       voice_note_url: voiceNoteUrl,
-      reactions: [],
-      votes: []
+      reactions: initialTask?.reactions || [],
+      votes: initialTask?.votes || []
     });
-    setTitle('');
-    setDescriptionHtml('');
-    setDueDate('');
-    setVoiceNoteUrl(null);
+    if (!initialTask) {
+        setTitle('');
+        setDescriptionHtml('');
+        setDueDate('');
+        setVoiceNoteUrl(null);
+    }
   };
 
   return (
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-      <h3 className="text-lg font-medium mb-3">Add New Task</h3>
+    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200" id="task-editor">
+      <h3 className="text-lg font-medium mb-3">{initialTask ? 'Edit Task' : 'Add New Task'}</h3>
 
       <div className="space-y-4">
         <input
@@ -250,13 +278,23 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin }) => {
             )}
           </div>
 
-          <button
-            onClick={handleSave}
-            className="flex items-center justify-center space-x-2 px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-          >
-            <Save className="h-4 w-4" />
-            <span>Save Task</span>
-          </button>
+          <div className="flex items-center gap-3">
+              {initialTask && (
+                <button
+                    onClick={onCancel}
+                    className="px-6 py-2 border border-gray-300 text-gray-600 rounded-md hover:bg-gray-50 transition"
+                >
+                    Cancel
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                className="flex items-center justify-center space-x-2 px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+              >
+                <Save className="h-4 w-4" />
+                <span>{initialTask ? 'Update Task' : 'Save Task'}</span>
+              </button>
+          </div>
         </div>
       </div>
     </div>
