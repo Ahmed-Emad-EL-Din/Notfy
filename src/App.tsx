@@ -251,7 +251,7 @@ function App() {
     })
     if (res.ok) {
       const data = await res.json()
-      setTasks(data.map((d: any) => ({
+      const fetchedTasks = data.map((d: any) => ({
         id: d._id,
         title: d.title,
         description_html: d.description_html,
@@ -259,9 +259,35 @@ function App() {
         completed: d.completed,
         userId: d.user_id,
         visibility: d.visibility || 'personal'
-      })))
+      }))
+      // Sort nearest first (due_date)
+      setTasks(fetchedTasks.sort((a: Task, b: Task) => a.dueDate.getTime() - b.dueDate.getTime()))
     }
   }
+
+  // Auto-sync Upcoming Events sidebar with pending tasks
+  useEffect(() => {
+    const now = new Date()
+    const upcoming = tasks
+      .filter(t => !t.completed && t.dueDate.getTime() > now.getTime())
+      .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+      .map(task => {
+        const diffMs = task.dueDate.getTime() - now.getTime()
+        const diffHours = Math.round(diffMs / (1000 * 60 * 60))
+        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24))
+        const urgency = diffHours <= 24 ? 'urgent' : diffDays <= 3 ? 'warning' : 'info'
+        const timeLabel = diffDays > 1 ? `in ${diffDays} days` : diffHours > 0 ? `in ${diffHours} hours` : 'soon'
+
+        return {
+          id: `upcoming-${task.id}`,
+          title: `📌 Upcoming: ${task.title}`,
+          message: `Due ${timeLabel}`,
+          timestamp: task.dueDate,
+          type: urgency as 'info' | 'warning' | 'urgent'
+        }
+      })
+    setNotifications(upcoming)
+  }, [tasks])
 
   const handleLogin = async (user: UserData) => {
     setCurrentUser(user)
@@ -328,7 +354,7 @@ function App() {
       })
       if (res.ok) {
         const data = await res.json()
-        const task: Task = {
+        const newTask: Task = {
           id: data._id,
           title: data.title,
           description_html: data.description_html,
@@ -337,25 +363,8 @@ function App() {
           userId: data.user_id,
           visibility: data.visibility || 'personal'
         }
-        setTasks(prev => [task, ...prev])
-
-        // Auto-add to upcoming events panel
-        const dueDate = new Date(data.due_date)
-        const now = new Date()
-        const diffMs = dueDate.getTime() - now.getTime()
-        const diffHours = Math.round(diffMs / (1000 * 60 * 60))
-        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24))
-        const urgency = diffHours <= 24 ? 'urgent' : diffDays <= 3 ? 'warning' : 'info'
-        const timeLabel = diffDays > 1 ? `in ${diffDays} days` : diffHours > 0 ? `in ${diffHours} hours` : 'soon'
-
-        const notification: AppNotification = {
-          id: `task-${data._id}-created`,
-          title: `📌 Upcoming: ${data.title}`,
-          message: `This task is due ${timeLabel}.`,
-          timestamp: now,
-          type: urgency
-        }
-        setNotifications(prev => [notification, ...prev])
+        // Add and keep sorted
+        setTasks(prev => [...prev, newTask].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime()))
       }
     }
   }

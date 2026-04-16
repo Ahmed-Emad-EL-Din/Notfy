@@ -125,7 +125,7 @@ export const handler = async (event: any, context: any) => {
           { user_id: uid },
           { user_id: { $in: adminIds }, visibility: 'global' }
         ]
-      }).sort({ created_at: -1 }).toArray()
+      }).sort({ due_date: 1 }).toArray()
       
       return { statusCode: 200, headers, body: JSON.stringify(tasks) }
     }
