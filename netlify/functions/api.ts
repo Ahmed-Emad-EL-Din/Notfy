@@ -68,8 +68,9 @@ export const handler = async (event: any, context: any) => {
     if (action !== 'telegramWebhook') {
        uid = await verifyAuth(event)
     }
-    const db = client.db('notfy')
-    
+
+    const mongoClient = await connectToDatabase()
+    const db = mongoClient.db('notfy')
 
     let body: any = {}
     if (event.body) {
@@ -116,12 +117,11 @@ export const handler = async (event: any, context: any) => {
       
       const doc = {
         ...body,
-        _id: new ObjectId().toString(),
         created_at: new Date().toISOString()
       }
       const result = await db.collection('tasks').insertOne(doc)
       const task = await db.collection('tasks').findOne({ _id: result.insertedId })
-      return { statusCode: 200, headers, body: JSON.stringify(task) }
+      return { statusCode: 200, headers, body: JSON.stringify({ ...task, _id: result.insertedId.toString() }) }
     }
 
     if (action === 'updateTask' && event.httpMethod === 'PUT') {

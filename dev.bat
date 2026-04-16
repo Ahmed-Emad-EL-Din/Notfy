@@ -103,9 +103,31 @@ echo   WHAT YOU CAN TEST:
 echo   [OK] Google + Email Login      (Firebase)
 echo   [OK] Task creation / deletion  (MongoDB)
 echo   [OK] Image uploads in tasks    (Cloudinary)
+echo   [OK] Voice recording           (Cloudinary audio)
 echo   [OK] Admin panel + invite link
 echo   [OK] Telegram connect button
 echo   [--] Background push cron      (Netlify only - not local)
+echo.
+echo  =============================================
+echo.
+echo  How do you want to test?
+echo  [1] Test LOCALLY  (http://localhost:8888)
+echo  [2] Test ONLINE   (opens buscoupler.netlify.app)
+echo  [3] Both
+echo.
+choice /C 123 /M "Select option"
+
+if errorlevel 3 (
+    start http://localhost:8888
+    start https://buscoupler.netlify.app
+) else if errorlevel 2 (
+    start https://buscoupler.netlify.app
+) else (
+    REM Wait 4 seconds for the server to start before opening browser
+    timeout /t 4 /nobreak >nul
+    start http://localhost:8888
+)
+
 echo.
 echo   Press Ctrl+C to stop at any time.
 echo  =============================================
