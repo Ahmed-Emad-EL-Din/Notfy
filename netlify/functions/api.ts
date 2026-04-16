@@ -61,12 +61,16 @@ export const handler = async (event: any, context: any) => {
   }
 
   try {
-    const uid = await verifyAuth(event)
+    const { action } = event.queryStringParameters || {}
     
-    const client = await connectToDatabase()
+    // Bypass verifyAuth ONLY for the incoming Telegram webhook
+    let uid: string | null = null;
+    if (action !== 'telegramWebhook') {
+       uid = await verifyAuth(event)
+    }
     const db = client.db('notfy')
     
-    const { action } = event.queryStringParameters || {}
+
     let body: any = {}
     if (event.body) {
       try {
@@ -78,7 +82,7 @@ export const handler = async (event: any, context: any) => {
 
     if (action === 'upsertUser' && event.httpMethod === 'POST') {
       const { id, email, name, is_admin } = body
-      if (id !== uid) throw new Error('Unauthorized')
+      if (!uid || id !== uid) throw new Error('Unauthorized')
       
       await db.collection('users').updateOne(
         { id },
@@ -191,7 +195,7 @@ export const handler = async (event: any, context: any) => {
 
     if (action === 'upsertSubscription' && event.httpMethod === 'POST') {
       const { user_id, endpoint, keys } = body
-      if (user_id !== uid) throw new Error('Unauthorized')
+      if (!uid || user_id !== uid) throw new Error('Unauthorized')
 
       await db.collection('push_subscriptions').updateOne(
         { endpoint },
@@ -199,6 +203,51 @@ export const handler = async (event: any, context: any) => {
         { upsert: true }
       )
       return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
+    // Telegram Bot Integration endpoints
+    if (action === 'checkTelegramStatus' && event.httpMethod === 'GET') {
+      if (!uid) throw new Error('Unauthorized')
+      const user = await db.collection('users').findOne({ id: uid })
+      return { statusCode: 200, headers, body: JSON.stringify({ connected: !!user?.telegram_chat_id }) }
+    }
+
+    if (action === 'telegramWebhook' && event.httpMethod === 'POST') {
+      try {
+        const update = body;
+        if (update?.message?.text) {
+          const text = update.message.text;
+          const chatId = update.message.chat.id;
+          
+          if (text.startsWith('/start ')) {
+            const linkedUid = text.split('/start ')[1].trim();
+            if (linkedUid) {
+               // Link the telegram chat ID to the Notfy User ID
+               await db.collection('users').updateOne(
+                 { id: linkedUid },
+                 { $set: { telegram_chat_id: chatId, telegram_updated_at: new Date() } }
+               )
+               
+               // Dispatch welcome message
+               const botToken = process.env.TELEGRAM_BOT_TOKEN;
+               if (botToken) {
+                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                       chat_id: chatId,
+                       text: 'Connected successfully! ✅ Return to your browser.'
+                    })
+                 }).catch(err => console.error("Telegram send failed:", err))
+               }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Webhook parse error:", err)
+      }
+      // Always return 200 OK to Telegram so it stops retrying the webhook
+      return { statusCode: 200, headers, body: 'OK' }
     }
 
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid action or method' }) }

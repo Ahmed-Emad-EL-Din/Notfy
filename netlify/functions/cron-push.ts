@@ -72,7 +72,7 @@ export const handler = schedule("@hourly", async (event) => {
             body: `You have an upcoming task: ${task.title}`
         })
 
-        return Promise.all(targetSubs.map(sub => {
+        const webPushPromises = targetSubs.map(sub => {
             const pushSub = {
                 endpoint: sub.endpoint,
                 keys: sub.keys
@@ -85,7 +85,27 @@ export const handler = schedule("@hourly", async (event) => {
                  }
                  console.error("Push Error", err)
               })
-        }))
+        })
+
+        // Telegram Push Logic
+        const telegramPromises = targetUserIds.map(async (uid) => {
+             const botToken = process.env.TELEGRAM_BOT_TOKEN;
+             if (!botToken) return;
+
+             const user = await db.collection('users').findOne({ id: uid });
+             if (user && user.telegram_chat_id) {
+                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({
+                         chat_id: user.telegram_chat_id,
+                         text: `🚀 Task Reminder: ${task.title}\nDue: ${new Date(task.due_date).toLocaleString()}`
+                     })
+                 }).catch(err => console.error("Cron Telegram Error:", err))
+             }
+        })
+
+        return Promise.all([...webPushPromises, ...telegramPromises])
     });
 
     await Promise.all(pushPromises)

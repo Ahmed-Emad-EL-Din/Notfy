@@ -43,6 +43,9 @@ function App() {
   
   // Link Handling state
   const [isProcessingInvite, setIsProcessingInvite] = useState(false)
+  
+  // Telegram State
+  const [telegramStatus, setTelegramStatus] = useState({ checked: false, connected: false, polling: false, attempts: 0 })
 
   useEffect(() => {
     if (!currentUser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
@@ -176,6 +179,51 @@ function App() {
        Object.values(localTimeouts).forEach(clearTimeout)
     }
   }, [tasks, currentUser])
+
+  // Initial and Polling Telegram Status
+  useEffect(() => {
+      let interval: any;
+      const checkTg = async () => {
+          if (!currentUser) return;
+          try {
+             const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+             const res = await fetch('/.netlify/functions/api?action=checkTelegramStatus', {
+                 headers: { 'Authorization': `Bearer ${token}` }
+             })
+                 if (res.ok) {
+                 const data = await res.json()
+                 if (data.connected && telegramStatus.polling) {
+                     alert("Connected successfully to Telegram!")
+                 }
+                 setTelegramStatus(s => {
+                    const newAttempts = s.polling ? s.attempts + 1 : s.attempts;
+                    const timeout = newAttempts >= 20; // Max 1 minute polling (20x3s)
+                    if (timeout && s.polling && !data.connected) {
+                         alert("Telegram connection timed out to save server resources. Please try connecting again when ready.");
+                    }
+                    return { 
+                        ...s, 
+                        checked: true, 
+                        connected: data.connected, 
+                        polling: data.connected || timeout ? false : s.polling,
+                        attempts: timeout ? 0 : newAttempts
+                    }
+                 })
+             }
+          } catch(e) {}
+      }
+
+      if (currentUser && !telegramStatus.checked) {
+          checkTg()
+      }
+
+      if (telegramStatus.polling && !telegramStatus.connected) {
+          interval = setInterval(checkTg, 3000)
+      }
+      return () => clearInterval(interval)
+  }, [currentUser, telegramStatus.polling, telegramStatus.connected, telegramStatus.checked])
+
+
 
   const fetchTasks = async () => {
     if (!currentUser) return
@@ -327,7 +375,26 @@ function App() {
                   <span className="text-sm font-medium text-gray-700">{currentUser.name}</span>
                 </div>
                 {/* Simple Dropdown mapping */}
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white max-h-0 overflow-hidden group-hover:max-h-60 transition-all duration-300 shadow-xl rounded-md border border-gray-100">
+                <div className="absolute right-0 top-full mt-2 w-56 bg-white max-h-0 overflow-hidden group-hover:max-h-60 transition-all duration-300 shadow-xl rounded-md border border-gray-100">
+                   
+                   {!telegramStatus.connected ? (
+                     <button 
+                       onClick={() => {
+                          setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
+                          // Note: Needs bot username configured below! Replace YOUR_BOT_USERNAME
+                          window.open(`https://t.me/YOUR_BOT_USERNAME?start=${currentUser.id}`, '_blank')
+                       }} 
+                       className="w-full text-left px-4 py-3 text-sm text-blue-600 hover:bg-blue-50 flex items-center border-b"
+                     >
+                        <Bell className="h-4 w-4 mr-2"/> 
+                        {telegramStatus.polling ? 'Connecting...' : 'Connect Telegram'}
+                     </button>
+                   ) : (
+                     <div className="w-full px-4 py-3 text-sm text-green-600 flex items-center border-b bg-green-50">
+                        <CheckCircle className="h-4 w-4 mr-2"/> Telegram Active
+                     </div>
+                   )}
+
                    <button onClick={handleDeleteAccount} className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 flex items-center">
                       <Trash2 className="h-4 w-4 mr-2"/> Delete Account
                    </button>

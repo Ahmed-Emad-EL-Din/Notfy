@@ -11,8 +11,10 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@netlify/functions@^5.2.0",
         "npm:@types/react-dom@^18.2.19",
         "npm:@types/react@^18.2.56",
+        "npm:@types/web-push@^3.6.4",
         "npm:@typescript-eslint/eslint-plugin@^7.0.2",
         "npm:@typescript-eslint/parser@^7.0.2",
         "npm:@vitejs/plugin-react@^4.2.1",
@@ -22,15 +24,19 @@
         "npm:eslint-plugin-react-hooks@^4.6.0",
         "npm:eslint-plugin-react-refresh@~0.4.5",
         "npm:eslint@^8.56.0",
+        "npm:firebase-admin@^13.8.0",
+        "npm:firebase@^12.12.0",
         "npm:lucide-react@0.344",
         "npm:mongodb@^7.1.1",
         "npm:postcss@^8.4.35",
         "npm:react-dom@^18.2.0",
+        "npm:react-quill@2",
         "npm:react@^18.2.0",
         "npm:tailwind-merge@^2.2.1",
         "npm:tailwindcss@^3.4.1",
         "npm:typescript@^5.2.2",
-        "npm:vite@^5.1.4"
+        "npm:vite@^5.1.4",
+        "npm:web-push@^3.6.7"
       ]
     }
   }

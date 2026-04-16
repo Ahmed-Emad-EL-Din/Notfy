@@ -1,9 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { Mic, Square, Save } from 'lucide-react';
-// import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-// import { storage } from '../lib/firebase'; // Assumes Firebase storage is initialized
 
 interface TaskEditorProps {
   onSave: (task: any) => void;
@@ -15,12 +13,87 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin }) => {
   const [descriptionHtml, setDescriptionHtml] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [visibility, setVisibility] = useState('personal');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const quillRef = useRef<ReactQuill>(null);
 
   // We leave voice note recording as a mockup that resolves to null since storage might not be configured.
   const [isRecording] = useState(false);
 
+  // Cloudinary Integrated Image Handler
+  const imageHandler = () => {
+    const input = document.createElement('input');
+    input.setAttribute('type', 'file');
+    input.setAttribute('accept', 'image/*');
+    input.click();
+
+    input.onchange = async () => {
+      const file = input.files ? input.files[0] : null;
+      if (!file) return;
+
+      const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+      const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+
+      if (!cloudName || !uploadPreset) {
+        alert("Cloudinary Environment Variables are not set. Cannot upload image.");
+        return;
+      }
+
+      setIsUploadingImage(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', uploadPreset);
+
+      try {
+        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await response.json();
+        
+        if (data.secure_url) {
+           const quill = quillRef.current?.getEditor();
+           if (quill) {
+             const range = quill.getSelection(true);
+             quill.insertEmbed(range.index, 'image', data.secure_url);
+             quill.setSelection(range.index + 1, 0); // moves cursor to the right
+           }
+        } else {
+           console.error("Cloudinary upload failed:", data);
+           alert("Failed to upload image to Cloudinary.");
+        }
+      } catch (error) {
+        console.error("Cloudinary error:", error);
+      } finally {
+        setIsUploadingImage(false);
+      }
+    };
+  };
+
+  const modules = useMemo(() => ({
+    toolbar: {
+      container: [
+        [{ 'header': [1, 2, false] }],
+        ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+        [{'list': 'ordered'}, {'list': 'bullet'}, {'indent': '-1'}, {'indent': '+1'}],
+        ['link', 'image'], // Only basic elements, but custom image hook
+        ['clean']
+      ],
+      handlers: {
+        image: imageHandler
+      }
+    }
+  }), []);
+
+  const formats = [
+    'header',
+    'bold', 'italic', 'underline', 'strike', 'blockquote',
+    'list', 'bullet', 'indent',
+    'link', 'image'
+  ];
+
   const handleSave = () => {
-    if (!title.trim()) return;
+    if (!title.trim() || isUploadingImage) return;
     onSave({
       title,
       description_html: descriptionHtml,
@@ -28,7 +101,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin }) => {
       completed: false,
       visibility,
       type: 'standard',
-      voice_note_url: null, // Audio integration stub
+      voice_note_url: null, // Ready for Cloudinary upgrade later
       reactions: [],
       votes: []
     });
@@ -50,12 +123,16 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin }) => {
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
-        <div className="bg-white">
+        <div className="bg-white relative">
+          {isUploadingImage && <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center font-medium text-blue-600">Uploading Image...</div>}
           <ReactQuill 
+            ref={quillRef}
             theme="snow" 
             value={descriptionHtml} 
             onChange={setDescriptionHtml} 
-            placeholder="Write task description with rich text..."
+            modules={modules}
+            formats={formats}
+            placeholder="Write task description with rich text and images..."
             className="h-32 mb-12"
           />
         </div>
