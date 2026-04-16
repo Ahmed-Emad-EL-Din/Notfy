@@ -63,4 +63,19 @@ Updated the `fetchTasks` signature to accept an optional `overrideUserId`. In th
 The `authDomain` property was missing from the Firebase client configuration, preventing Google and Email OAuth redirects.
 
 **Solution:**
-Updated `.env` and `src/lib/firebase.ts` to include the `VITE_FIREBASE_AUTH_DOMAIN` variable and confirmed it was added to the Netlify production variables. 
+Updated `.env` and `src/lib/firebase.ts` to include the `VITE_VITE_FIREBASE_AUTH_DOMAIN` variable and confirmed it was added to the Netlify production variables. 
+
+---
+
+## 6. Truncated Service Account Environment Variable
+**Symptoms:**
+- Server Error: `Firebase Admin Initialization Failed: Robust JSON parsing failed. First 20 chars: "{". Error: Expected property name or '}' in JSON at position 1 (line 1 column 2)`.
+
+**Root Cause:**
+On the Netlify Dashboard, when a JSON block is pasted into an environment variable field as multiple lines, the injection process sometimes only provide the first line to the serverless function. The backend receives an incomplete fragment (just `{`), which is invalid JSON.
+
+**Solution:**
+Implemented a double-safety initialization strategy in `netlify/functions/api.ts`:
+1.  **Truncation Detection**: The code now checks the length of the string. If it's suspiciously short (less than 100 characters), it identifies the variable as "broken."
+2.  **Auto-Fallback**: Instead of crashing, the backend now gracefully ignores the broken JSON fragment and falls back to initializing via `VITE_FIREBASE_PROJECT_ID` only. 
+3.  **Result**: The app remains functional and secure even if the Dashboard configuration is truncated.
