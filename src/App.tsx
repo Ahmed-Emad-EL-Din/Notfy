@@ -603,7 +603,17 @@ function App() {
                        disabled={telegramStatus.polling}
                        onClick={() => {
                           setTelegramStatus(s => ({ ...s, polling: true, attempts: 0 }))
-                          window.open(`https://t.me/RelaySignals_bot?start=${currentUser.id}`, '_blank')
+                          // Native link is much faster than t.me redirect
+                          const nativeLink = `tg://resolve?domain=RelaySignals_bot&start=${currentUser.id}`;
+                          const webLink = `https://t.me/RelaySignals_bot?start=${currentUser.id}`;
+                          
+                          // Try to open the app directly
+                          window.location.href = nativeLink;
+                          
+                          // Fallback to web link in a new tab after a short delay if app didn't open
+                          setTimeout(() => {
+                            window.open(webLink, '_blank');
+                          }, 1000);
                        }} 
                        className={`w-full text-left px-4 py-3 text-sm flex items-center border-b ${telegramStatus.polling ? 'text-gray-400 bg-gray-50' : 'text-blue-600 hover:bg-blue-50'}`}
                      >
