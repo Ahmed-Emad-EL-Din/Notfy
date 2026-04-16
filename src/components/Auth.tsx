@@ -30,14 +30,15 @@ function Auth({ onLogin }: AuthProps) {
   const getFriendlyError = (err: any): string => {
     const code = err.code || ''
     const messages: Record<string, string> = {
-      'auth/user-not-found':       'No account found with this email. Please sign up first.',
-      'auth/wrong-password':       'Incorrect password. Please try again.',
-      'auth/invalid-credential':   'Incorrect email or password. Please try again.',
-      'auth/email-already-in-use': 'An account with this email already exists. Try signing in.',
-      'auth/weak-password':        'Password must be at least 6 characters.',
-      'auth/invalid-email':        'Please enter a valid email address.',
-      'auth/too-many-requests':    'Too many failed attempts. Please wait a few minutes and try again.',
-      'auth/network-request-failed': 'Network error. Please check your internet connection.',
+      'auth/user-not-found':        'No account found with this email. Please sign up first.',
+      'auth/wrong-password':        'Incorrect password. Please try again.',
+      'auth/invalid-credential':    'Incorrect email or password. Please try again.',
+      'auth/email-already-in-use':  'An account with this email already exists. Try signing in.',
+      'auth/weak-password':         'Password must be at least 6 characters.',
+      'auth/invalid-email':         'Please enter a valid email address.',
+      'auth/too-many-requests':     'Too many failed attempts. Please wait a few minutes and try again.',
+      'auth/network-request-failed':'Network error. Please check your internet connection.',
+      'auth/unauthorized-domain':   'Login is blocked: this domain is not authorized in Firebase. Go to Firebase Console → Authentication → Settings → Authorized Domains and add this site\'s domain.',
     }
     return messages[code] || err.message || 'Authentication failed. Please try again.'
   }
