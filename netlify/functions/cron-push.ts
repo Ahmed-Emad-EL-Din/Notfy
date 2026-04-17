@@ -17,8 +17,12 @@ async function connectToDatabase() {
 
 // Config web-push with VAPID keys if they exist in env
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT) {
+  let subject = process.env.VAPID_SUBJECT;
+  if (!subject.startsWith('mailto:') && !subject.startsWith('http')) {
+    subject = `mailto:${subject}`;
+  }
   webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT,
+    subject,
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY
   )
