@@ -395,12 +395,25 @@ export const handler = async (event: any, context: any) => {
     }
 
     if (action === 'deleteAccount' && event.httpMethod === 'DELETE') {
+      if (!uid) throw new Error('Unauthorized')
+
       // Remove all data associated with user
       await db.collection('users').deleteOne({ id: uid })
       await db.collection('tasks').deleteMany({ user_id: uid })
-      await db.collection('user_links').deleteMany({ user_id: uid })
       await db.collection('push_subscriptions').deleteMany({ user_id: uid })
-      // Optionally remove from firebase auth directly if using Admin SDK for auth
+      
+      // Remove all invitation links they created
+      await db.collection('invites').deleteMany({ admin_id: uid })
+      
+      // Remove all workspace relationships (as user or as admin)
+      await db.collection('user_links').deleteMany({ 
+        $or: [
+          { user_id: uid },
+          { admin_id: uid }
+        ]
+      })
+
+      // Optionally remove from firebase auth directly
       try {
         await admin.auth().deleteUser(uid)
       } catch (err) {
