@@ -568,7 +568,8 @@ function App() {
         await navigator.clipboard.writeText(link)
         alert('Workspace Invite Link copied to clipboard!')
       } else {
-        alert("Failed to generate invite.")
+        const errText = await res.text().catch(() => '');
+        alert(`Failed to generate invite. Server responded with ${res.status}: ${errText}`);
       }
     } catch (e) {
       console.error(e)
@@ -637,9 +638,16 @@ function App() {
       <header className="bg-white shadow-sm border-b sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-1 sm:space-x-2">
+             <div className="flex items-center space-x-1 sm:space-x-2">
               <Bell className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">RelaySignal</h1>
+              <div className="flex flex-col sm:flex-row sm:items-baseline sm:space-x-2">
+                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">RelaySignal</h1>
+                {isAdmin && (
+                  <span className="text-[10px] sm:text-xs font-black bg-blue-600 text-white px-1.5 py-0.5 rounded tracking-widest uppercase">
+                    Admin
+                  </span>
+                )}
+              </div>
             </div>
             
             <div className="flex items-center space-x-4">
@@ -657,7 +665,7 @@ function App() {
                     title="Copy Invite Link"
                   >
                     <Link className="h-4 w-4" />
-                    <span>{isGeneratingInvite ? 'Generating...' : 'Invite Users'}</span>
+                    <span>{isGeneratingInvite ? 'Generating...' : 'Generate Invite Link'}</span>
                   </button>
                   
                   <button
@@ -804,10 +812,15 @@ function App() {
               )}
 
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-800 flex items-center">
-                  <Calendar className="h-5 w-5 mr-2 text-blue-500" />
-                  My Tasks
-                </h2>
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-800 flex items-center">
+                    <Calendar className="h-5 w-5 mr-2 text-blue-500" />
+                    {isAdmin && showAdminPanel ? 'Admin Dashboard' : 'Your Tasks'}
+                  </h2>
+                  {isAdmin && showAdminPanel && (
+                    <p className="text-xs text-gray-500 mt-1 font-medium">Manage notifications and followers</p>
+                  )}
+                </div>
                 <span className="text-sm px-3 py-1 bg-blue-50 text-blue-600 rounded-full font-medium">
                   {tasks.filter(t => !t.completed).length} pending
                 </span>

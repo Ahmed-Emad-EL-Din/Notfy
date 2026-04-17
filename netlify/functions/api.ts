@@ -338,6 +338,9 @@ export const handler = async (event: any, context: any) => {
     }
 
     if (action === 'generateInvite' && event.httpMethod === 'POST') {
+      if (!uid || !userIsAdmin) {
+          throw new Error('Forbidden: Only administrators can generate invite links')
+      }
       const { role } = body || { role: 'user' }
       
       // Reuse existing invite if any
