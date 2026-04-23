@@ -40,18 +40,21 @@ export const handler = schedule("@hourly", async (event) => {
     const client = await connectToDatabase()
     const db = client.db('notfy')
 
-    // Find all tasks that are due in the next 24 hours and not completed
+    // Find tasks due in the next hour that haven't had a push sent recently
     const now = new Date()
-    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000)
+    const dedupThreshold = new Date(now.getTime() - 55 * 60 * 1000) // 55 minutes ago
     
-    // We only want to push tasks that are between now and tomorrow, and haven't been pushed already.
-    // simpler logic: push tasks due tomorrow.
     const upcomingTasks = await db.collection('tasks').find({
         completed: false,
         due_date: {
             $gte: now.toISOString(),
-            $lte: tomorrow.toISOString()
-        }
+            $lte: oneHourLater.toISOString()
+        },
+        $or: [
+            { last_push_sent_at: { $exists: false } },
+            { last_push_sent_at: { $lt: dedupThreshold.toISOString() } }
+        ]
     }).toArray()
     
     if (upcomingTasks.length === 0) {
@@ -108,6 +111,12 @@ export const handler = schedule("@hourly", async (event) => {
                  }).catch(err => console.error("Cron Telegram Error:", err))
              }
         })
+
+        // Mark task as pushed after sending
+        await db.collection('tasks').updateOne(
+            { _id: task._id },
+            { $set: { last_push_sent_at: now.toISOString() } }
+        )
 
         return Promise.all([...webPushPromises, ...telegramPromises])
     });

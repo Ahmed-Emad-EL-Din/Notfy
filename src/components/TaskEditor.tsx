@@ -2,9 +2,11 @@ import React, { useState, useRef, useMemo } from 'react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { Mic, Square, Save } from 'lucide-react';
+type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly';
+type TaskAttachment = { url: string; name: string; mimeType: string; size: number };
 
 interface TaskEditorProps {
-  onSave: (task: any) => void;
+  onSave: (task: any) => Promise<void> | void;
   isAdmin: boolean;
   initialTask?: any;
   onCancel?: () => void;
@@ -19,12 +21,20 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
   const [isRecording, setIsRecording] = useState(false);
   const [voiceNoteUrl, setVoiceNoteUrl] = useState<string | null>(null);
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   
   // New features
   const [groupName, setGroupName] = useState('');
   const [isPoll, setIsPoll] = useState(false);
   const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
   const [showPollResults, setShowPollResults] = useState(true);
+  const [recurrenceEnabled, setRecurrenceEnabled] = useState(false);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('daily');
+  const [recurrenceInterval, setRecurrenceInterval] = useState(1);
+  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
 
   const quillRef = useRef<ReactQuill>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -47,6 +57,11 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
         setIsPoll(initialTask.isPoll || false);
         setPollOptions(initialTask.pollOptions?.length ? initialTask.pollOptions : ['', '']);
         setShowPollResults(initialTask.showPollResults !== undefined ? initialTask.showPollResults : true);
+        setRecurrenceEnabled(!!initialTask.recurrence);
+        setRecurrenceFrequency(initialTask.recurrence?.frequency || 'daily');
+        setRecurrenceInterval(initialTask.recurrence?.interval || 1);
+        setPriority(initialTask.priority || 'medium');
+        setAttachments(initialTask.attachments || []);
     } else {
         // Reset if we stop editing
         setTitle('');
@@ -58,8 +73,50 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
         setIsPoll(false);
         setPollOptions(['', '']);
         setShowPollResults(true);
+        setRecurrenceEnabled(false);
+        setRecurrenceFrequency('daily');
+        setRecurrenceInterval(1);
+        setPriority('medium');
+        setAttachments([]);
     }
   }, [initialTask]);
+
+  const uploadAttachment = async (file: File) => {
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+    if (!cloudName || !uploadPreset) {
+      setFormError('Cloudinary is not configured for attachments.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setFormError('Attachment exceeds 10MB limit.');
+      return;
+    }
+    const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'text/plain'];
+    if (!allowed.includes(file.type)) {
+      setFormError('Unsupported attachment type. Allowed: PDF, PNG, JPG, WEBP, TXT.');
+      return;
+    }
+
+    setIsUploadingAttachment(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', uploadPreset);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!data.secure_url) throw new Error('Upload failed');
+      setAttachments(prev => [...prev, { url: data.secure_url, name: file.name, mimeType: file.type, size: file.size }]);
+    } catch (err) {
+      console.error(err);
+      setFormError('Failed to upload attachment.');
+    } finally {
+      setIsUploadingAttachment(false);
+    }
+  };
 
   // ---- Voice Recording ----
   const startRecording = async () => {
@@ -189,39 +246,98 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
   const formats = ['header', 'bold', 'italic', 'underline', 'strike', 'blockquote', 'list', 'bullet', 'indent', 'color', 'background', 'link', 'image'];
 
   const handleSave = () => {
-    if (!title.trim() || isUploadingImage || isUploadingAudio) return;
-    onSave({
-      id: initialTask?.id, // include ID if editing
-      title,
-      description_html: descriptionHtml,
-      due_date: new Date(dueDate || Date.now()).toISOString(),
-      completed: initialTask?.completed || false,
-      visibility,
-      type: isPoll ? 'poll' : 'standard',
-      voice_note_url: voiceNoteUrl,
-      reactions: initialTask?.reactions || {},
-      votes: initialTask?.votes || {},
-      groupName: groupName.trim() || undefined,
-      isPoll,
-      pollOptions: isPoll ? pollOptions.filter(o => o.trim() !== '') : [],
-      showPollResults: isPoll ? showPollResults : false
-    });
-    if (!initialTask) {
-        setTitle('');
-        setDescriptionHtml('');
-        setDueDate('');
-        setVoiceNoteUrl(null);
-        setGroupName('');
-        setIsPoll(false);
-        setPollOptions(['', '']);
-    }
+    const save = async () => {
+      setFormError(null);
+      if (isUploadingImage || isUploadingAudio || isUploadingAttachment || isSaving) return;
+
+      const normalizedTitle = title.trim();
+      if (!normalizedTitle) {
+        setFormError('Task title is required.');
+        return;
+      }
+
+      if (normalizedTitle.length > 120) {
+        setFormError('Task title must be 120 characters or fewer.');
+        return;
+      }
+
+      const computedDueDate = dueDate ? new Date(dueDate) : new Date();
+      if (Number.isNaN(computedDueDate.getTime())) {
+        setFormError('Please provide a valid due date.');
+        return;
+      }
+
+      const normalizedPollOptions = isPoll
+        ? pollOptions.map(opt => opt.trim()).filter(Boolean)
+        : [];
+
+      if (isPoll && normalizedPollOptions.length < 2) {
+        setFormError('Polls require at least 2 non-empty options.');
+        return;
+      }
+
+      if (new Set(normalizedPollOptions.map(opt => opt.toLowerCase())).size !== normalizedPollOptions.length) {
+        setFormError('Poll options must be unique.');
+        return;
+      }
+
+      setIsSaving(true);
+      try {
+        await onSave({
+          id: initialTask?.id, // include ID if editing
+          title: normalizedTitle,
+          description_html: descriptionHtml,
+          due_date: computedDueDate.toISOString(),
+          completed: initialTask?.completed || false,
+          visibility,
+          type: isPoll ? 'poll' : 'standard',
+          voice_note_url: voiceNoteUrl,
+          reactions: initialTask?.reactions || {},
+          votes: initialTask?.votes || {},
+          groupName: groupName.trim() || undefined,
+          isPoll,
+          pollOptions: normalizedPollOptions,
+          showPollResults: isPoll ? showPollResults : false
+          ,
+          priority,
+          recurrence: recurrenceEnabled ? { frequency: recurrenceFrequency, interval: recurrenceInterval } : undefined,
+          attachments
+        });
+        if (!initialTask) {
+          setTitle('');
+          setDescriptionHtml('');
+          setDueDate('');
+          setVoiceNoteUrl(null);
+          setGroupName('');
+          setIsPoll(false);
+          setPollOptions(['', '']);
+          setRecurrenceEnabled(false);
+          setRecurrenceFrequency('daily');
+          setRecurrenceInterval(1);
+          setPriority('medium');
+          setAttachments([]);
+        }
+      } catch (err) {
+        console.error(err);
+        setFormError('Failed to save task. Please try again.');
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    void save();
   };
 
   return (
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200" id="task-editor">
-      <h3 className="text-lg font-medium mb-3">{initialTask ? 'Edit Task' : 'Add New Task'}</h3>
+    <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-gray-200" id="task-editor">
+      <h3 className="text-base sm:text-lg font-semibold mb-3">{initialTask ? 'Edit Task' : 'Add New Task'}</h3>
 
       <div className="space-y-4">
+        {formError && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {formError}
+          </div>
+        )}
         <input
           type="text"
           placeholder="Task title"
@@ -244,11 +360,11 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
             modules={modules}
             formats={formats}
             placeholder="Write task description with rich text and images..."
-            className="h-32 mb-12"
+            className="task-editor-quill h-32 mb-16 sm:mb-12"
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm text-gray-600 mb-1">Due Date</label>
             <input
@@ -282,10 +398,24 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
               {isAdmin && <option value="global">Global (All Linked Users)</option>}
             </select>
           </div>
+
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">Priority</label>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as any)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
         </div>
 
         {/* Polling Options */}
-        <div className="border border-gray-200 rounded-md p-4 bg-gray-50">
+        <div className="border border-gray-200 rounded-md p-3 sm:p-4 bg-gray-50">
            <div className="flex items-center mb-3">
               <input 
                  type="checkbox" 
@@ -298,7 +428,7 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
            </div>
            
            {isPoll && (
-              <div className="ml-5 space-y-2">
+              <div className="ml-1 sm:ml-5 space-y-2">
                  {pollOptions.map((opt, i) => (
                     <div key={i} className="flex items-center space-x-2">
                        <input
@@ -312,11 +442,11 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
                           }}
                           className="flex-1 px-3 py-1 border border-gray-300 rounded focus:border-blue-500 outline-none shadow-sm"
                        />
-                       {i === pollOptions.length - 1 && (
-                          <button onClick={() => setPollOptions([...pollOptions, ''])} className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">+</button>
+                         {i === pollOptions.length - 1 && (
+                          <button type="button" onClick={() => setPollOptions([...pollOptions, ''])} className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">+</button>
                        )}
                        {pollOptions.length > 2 && (
-                          <button onClick={() => setPollOptions(pollOptions.filter((_, idx) => idx !== i))} className="px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 text-sm">-</button>
+                          <button type="button" onClick={() => setPollOptions(pollOptions.filter((_, idx) => idx !== i))} className="px-2 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 text-sm">-</button>
                        )}
                     </div>
                  ))}
@@ -334,17 +464,58 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
            )}
         </div>
 
-        <div className="flex items-center justify-between pt-2">
-          <div className="flex items-center gap-3">
+        <div className="border border-gray-200 rounded-md p-3 sm:p-4 bg-gray-50 space-y-3">
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="recurring" checked={recurrenceEnabled} onChange={(e) => setRecurrenceEnabled(e.target.checked)} />
+            <label htmlFor="recurring" className="font-medium text-gray-700">Recurring task</label>
+          </div>
+          {recurrenceEnabled && (
+            <div className="grid grid-cols-2 gap-3">
+              <select value={recurrenceFrequency} onChange={(e) => setRecurrenceFrequency(e.target.value as RecurrenceFrequency)} className="w-full px-3 py-2 border border-gray-300 rounded-md">
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              <input type="number" min={1} max={12} value={recurrenceInterval} onChange={(e) => setRecurrenceInterval(Number(e.target.value || 1))} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+          )}
+        </div>
+
+        <div className="border border-gray-200 rounded-md p-3 sm:p-4 bg-gray-50">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+            <p className="font-medium text-gray-700">Attachments</p>
+            <input
+              type="file"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadAttachment(file);
+              }}
+              disabled={isUploadingAttachment}
+              className="text-sm w-full sm:w-auto"
+            />
+          </div>
+          {isUploadingAttachment && <p className="text-sm text-blue-600">Uploading attachment...</p>}
+          <div className="space-y-1">
+            {attachments.map((attachment, idx) => (
+              <div key={`${attachment.url}-${idx}`} className="flex items-center justify-between gap-2 text-sm bg-white px-2 py-1 rounded border">
+                <a href={attachment.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline truncate max-w-[75%]">{attachment.name}</a>
+                <button type="button" onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))} className="text-red-500">Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 pt-2">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={isRecording ? stopRecording : startRecording}
-              disabled={isUploadingAudio}
+              disabled={isUploadingAudio || isSaving}
               className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm font-medium transition-colors ${
                 isRecording
                   ? 'bg-red-100 text-red-600 animate-pulse'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
+              } disabled:opacity-60`}
             >
               {isRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
               <span>
@@ -364,21 +535,23 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end items-stretch sm:items-center gap-2">
               {initialTask && (
                 <button
                     onClick={onCancel}
-                    className="px-6 py-2 border border-gray-300 text-gray-600 rounded-md hover:bg-gray-50 transition"
+                    disabled={isSaving}
+                    className="w-full sm:w-auto px-6 py-2 border border-gray-300 text-gray-600 rounded-md hover:bg-gray-50 transition disabled:opacity-60"
                 >
                     Cancel
                 </button>
               )}
               <button
                 onClick={handleSave}
-                className="flex items-center justify-center space-x-2 px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                disabled={isUploadingImage || isUploadingAudio || isSaving}
+                className="w-full sm:w-auto flex items-center justify-center space-x-2 px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-60"
               >
                 <Save className="h-4 w-4" />
-                <span>{initialTask ? 'Update Task' : 'Save Task'}</span>
+                <span>{isSaving ? 'Saving...' : initialTask ? 'Update Task' : 'Save Task'}</span>
               </button>
           </div>
         </div>

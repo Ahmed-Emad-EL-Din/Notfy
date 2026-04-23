@@ -19,10 +19,13 @@ interface Task {
   visibility?: string
   groupName?: string
   type?: 'standard' | 'poll'
+  priority?: 'low' | 'medium' | 'high' | 'urgent'
   pollOptions?: string[]
   showPollResults?: boolean
   votes?: Record<number, Array<{uid: string, anonymous: boolean}>>
   reactions?: Record<string, string[]>
+  recurrence?: { frequency: 'daily' | 'weekly' | 'monthly'; interval: number }
+  attachments?: Array<{ url: string; name: string; mimeType: string; size: number }>
 }
 
 interface AppNotification {
@@ -31,6 +34,8 @@ interface AppNotification {
   message: string
   timestamp: Date
   type: 'info' | 'warning' | 'urgent'
+  isRead?: boolean
+  taskId?: string
 }
 
 interface UserData {
@@ -61,6 +66,13 @@ function App() {
   const [activeTab, setActiveTab] = useState<'tasks' | 'notifications'>('tasks')
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false)
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'info' | 'warning' | 'urgent'>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'completed' | 'pending'>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'standard' | 'poll'>('all')
+  const [priorityFilter, setPriorityFilter] = useState<'all' | 'low' | 'medium' | 'high' | 'urgent'>('all')
+  const [sortMode, setSortMode] = useState<'dueSoonest' | 'newest'>('newest')
+  const [activityByTask, setActivityByTask] = useState<Record<string, Array<{ id: string; detail: string; created_at: string; actor_id: string; action: string }>>>({})
 
   const processingLogins = useRef(new Set<string>())
 
@@ -92,8 +104,8 @@ function App() {
              return;
           }
 
-          if (isLocal) {
-            // Local dev bypass — only runs if Firebase has no session
+          if (isLocal && !localStorage.getItem('relaysignal_manually_signed_out')) {
+            // Local dev auto-login ONLY if we haven't explicitly signed out
             await handleLogin({
               id: 'local-admin-debug',
               email: 'local@dev.com',
@@ -298,51 +310,75 @@ function App() {
         visibility: d.visibility || 'personal',
         groupName: d.groupName,
         type: d.type || 'standard',
+        priority: d.priority || 'medium',
         pollOptions: d.pollOptions || [],
         showPollResults: d.showPollResults !== undefined ? d.showPollResults : true,
         reactions: d.reactions || {},
-        votes: d.votes || {}
+        votes: d.votes || {},
+        recurrence: d.recurrence,
+        attachments: d.attachments || []
       }))
       // Sort nearest first (due_date)
       setTasks(fetchedTasks.sort((a: Task, b: Task) => a.dueDate.getTime() - b.dueDate.getTime()))
     }
   }
 
-  // Auto-sync Upcoming Events sidebar with pending tasks
-  useEffect(() => {
-    const now = new Date()
-    const upcoming = tasks
-      .filter(t => !t.completed && t.dueDate.getTime() > now.getTime() && !mutedTasks.includes(t.id))
-      .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
-      .map(task => {
-        const diffMs = task.dueDate.getTime() - now.getTime()
-        const diffHours = Math.round(diffMs / (1000 * 60 * 60))
-        const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24))
-        const urgency = diffHours <= 24 ? 'urgent' : diffDays <= 3 ? 'warning' : 'info'
-        const timeLabel = diffDays > 1 ? `in ${diffDays} days` : diffHours > 0 ? `in ${diffHours} hours` : 'soon'
+  const fetchNotifications = async () => {
+    if (!currentUser) return
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const typeQuery = notificationFilter === 'all' ? '' : `&type=${notificationFilter}`
+    const res = await fetch(`/.netlify/functions/api?action=getNotifications${typeQuery}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    if (!Array.isArray(data)) {
+      setNotifications([])
+      return
+    }
+    const mapped: AppNotification[] = data.map((n: any) => ({
+      id: n._id,
+      title: n.title,
+      message: n.message,
+      timestamp: new Date(n.created_at),
+      type: n.type || 'info',
+      isRead: !!n.is_read,
+      taskId: n.task_id
+    }))
+    setNotifications(mapped)
+  }
 
-        return {
-          id: `upcoming-${task.id}`,
-          title: `📌 Upcoming: ${task.title}`,
-          message: `Due ${timeLabel}`,
-          timestamp: task.dueDate,
-          type: urgency as 'info' | 'warning' | 'urgent'
-        }
-      })
-    setNotifications(upcoming)
-  }, [tasks])
+  const fetchTaskActivity = async (taskId: string) => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch(`/.netlify/functions/api?action=getTaskActivity&taskId=${taskId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    setActivityByTask(prev => ({ ...prev, [taskId]: data.map((a: any) => ({ id: a._id, ...a })) }))
+  }
+
+  useEffect(() => {
+    if (!currentUser) return
+    fetchNotifications().catch(console.error)
+  }, [currentUser, notificationFilter])
 
   const handleLogin = async (user: UserData) => {
-    // Prevent redundant concurrent calls for the same user
+    // If we're already logged in with this ID and the admin status matches, skip
+    if (currentUser?.id === user.id && isAdmin === user.isAdmin) return
+    
+    // Set base profile immediately so authenticated users are not stuck on Auth UI
+    setCurrentUser(user)
+
+    // Always prioritize 'true' for admin status during the transition
+    if (user.isAdmin) setIsAdmin(true)
+    
     if (processingLogins.current.has(user.id)) return
     processingLogins.current.add(user.id)
 
     try {
-        setCurrentUser(user)
-        setIsAdmin(user.isAdmin)
-        
         subscribeUserToPush(user.id)
-        
+
         const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
         const upsertRes = await fetch('/.netlify/functions/api?action=upsertUser', {
           method: 'POST',
@@ -366,6 +402,7 @@ function App() {
             setMutedTasks(dbUser.muted_tasks || []);
             
             await fetchTasks(user.id)
+            await fetchNotifications()
             
             // Load admin's linked users if admin
             if (dbUser.is_admin) {
@@ -382,10 +419,15 @@ function App() {
     }
   }
 
-  const handleLogout = () => {
+   const handleLogout = () => {
+    auth.signOut()
     setCurrentUser(null)
     setIsAdmin(false)
     setShowAdminPanel(false)
+    setTasks([])
+    setUsers([])
+    // Prevent local dev from auto-logging back in immediately
+    localStorage.setItem('relaysignal_manually_signed_out', '1')
   }
 
   const handleDeleteAccount = async () => {
@@ -435,7 +477,14 @@ function App() {
             dueDate: new Date(newTask.due_date),
             completed: newTask.completed,
             userId: newTask.user_id,
-            visibility: newTask.visibility
+            visibility: newTask.visibility,
+            recurrence: newTask.recurrence,
+            attachments: newTask.attachments || [],
+            type: newTask.type || 'standard',
+            pollOptions: newTask.pollOptions || [],
+            showPollResults: newTask.showPollResults !== undefined ? newTask.showPollResults : true,
+            reactions: newTask.reactions || {},
+            votes: newTask.votes || {}
           }
           const newList = [...tasks, taskModel].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
           setTasks(newList)
@@ -532,6 +581,57 @@ function App() {
     if (res.ok) {
         const data = await res.json()
         setTasks(tasks.map(t => t.id === taskId ? { ...t, votes: data.votes } : t))
+    }
+  }
+
+  const handleMarkNotificationRead = async (notificationId: string, isRead: boolean) => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=markNotificationRead', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ id: notificationId, is_read: isRead })
+    })
+    if (res.ok) {
+      setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, isRead } : n))
+    }
+  }
+
+  const handleClearNotifications = async () => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=clearNotifications', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
+    }
+  }
+
+  const handleSnoozeTask = async (taskId: string) => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=snoozeTask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ id: taskId, minutes: 30 })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, dueDate: new Date(data.due_date), completed: false } : t))
+      fetchTaskActivity(taskId).catch(console.error)
+    }
+  }
+
+  const handleSkipOccurrence = async (taskId: string) => {
+    const token = await auth.currentUser?.getIdToken() || 'local-debug-token'
+    const res = await fetch('/.netlify/functions/api?action=skipOccurrence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ id: taskId })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, dueDate: new Date(data.due_date), completed: false } : t))
+      fetchTaskActivity(taskId).catch(console.error)
     }
   }
 
@@ -633,14 +733,28 @@ function App() {
       return <div className="min-h-screen flex items-center justify-center bg-gray-100"><p className="text-xl">Linking to Admin Workspace...</p></div>
   }
 
+  const filteredTasks = tasks
+    .filter(task => {
+      const query = searchQuery.trim().toLowerCase()
+      const matchesSearch = !query || task.title.toLowerCase().includes(query) || (task.description_html || '').toLowerCase().includes(query)
+      const matchesStatus = statusFilter === 'all' || (statusFilter === 'completed' ? task.completed : !task.completed)
+      const matchesType = typeFilter === 'all' || task.type === typeFilter
+      const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter
+      return matchesSearch && matchesStatus && matchesType && matchesPriority
+    })
+    .sort((a, b) => {
+      if (sortMode === 'newest') return b.dueDate.getTime() - a.dueDate.getTime()
+      return a.dueDate.getTime() - b.dueDate.getTime()
+    })
+
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      <header className="bg-white shadow-sm border-b sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-             <div className="flex items-center space-x-1 sm:space-x-2">
+      <header className="bg-white/95 backdrop-blur shadow-sm border-b sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap justify-between items-center gap-2 py-2 sm:py-0 sm:h-16">
+             <div className="flex items-center space-x-1 sm:space-x-2 min-w-0">
               <Bell className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
-              <div className="flex flex-col sm:flex-row sm:items-baseline sm:space-x-2">
+              <div className="flex flex-col sm:flex-row sm:items-baseline sm:space-x-2 min-w-0">
                 <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">RelaySignal</h1>
                 {isAdmin && (
                   <span className="text-[10px] sm:text-xs font-black bg-blue-600 text-white px-1.5 py-0.5 rounded tracking-widest uppercase">
@@ -650,7 +764,7 @@ function App() {
               </div>
             </div>
             
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center flex-wrap justify-end gap-2 sm:gap-4">
               {isAdmin && (
                 <>
                   <div className="hidden md:flex items-center space-x-1.5 px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-gray-600 text-sm font-semibold">
@@ -661,7 +775,7 @@ function App() {
                   <button
                     onClick={handleGenerateInvite}
                     disabled={isGeneratingInvite}
-                    className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 transition text-xs sm:text-sm md:text-base disabled:opacity-50"
+                    className="flex items-center space-x-2 px-2.5 sm:px-3 py-2 rounded-lg bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 transition text-xs sm:text-sm disabled:opacity-50"
                     title="Copy Invite Link"
                   >
                     <Link className="h-4 w-4" />
@@ -670,7 +784,7 @@ function App() {
                   
                   <button
                     onClick={() => setShowAdminPanel(!showAdminPanel)}
-                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition text-sm sm:text-base"
+                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition text-xs sm:text-sm"
                   >
                     <Settings className="h-4 w-4" />
                     <span className="hidden sm:inline">{showAdminPanel ? 'User View' : 'Admin Panel'}</span>
@@ -680,9 +794,9 @@ function App() {
               )}
               
               <div className="relative">
-                <div 
+                <div
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                  className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50 transition-colors"
+                  className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-200"
                 >
                   <User className="h-6 w-6 text-gray-600" />
                   <span className="text-sm font-medium text-gray-700 hidden sm:inline">{currentUser.name}</span>
@@ -694,7 +808,7 @@ function App() {
                       className="fixed inset-0 z-10" 
                       onClick={() => setIsUserMenuOpen(false)}
                     />
-                    <div className="absolute right-0 top-full mt-2 w-56 bg-white shadow-xl rounded-lg border border-gray-100 z-20 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="absolute right-0 top-full mt-2 w-64 bg-white shadow-xl rounded-lg border border-gray-100 z-20 overflow-hidden py-1 animate-in fade-in slide-in-from-top-2 duration-200">
                       {!telegramStatus.connected ? (
                           <div className="border-b border-gray-50">
                             <button 
@@ -779,7 +893,7 @@ function App() {
         )}
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+      <main className="flex-1 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 w-full">
         {showAdminPanel ? (
           <AdminPanel 
             isAdmin={isAdmin}
@@ -788,23 +902,23 @@ function App() {
             users={users}
           />
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-            <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 ${activeTab !== 'tasks' ? 'hidden lg:block' : ''}`}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8 items-start">
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 ${activeTab !== 'tasks' ? 'hidden lg:block' : ''}`}>
               
               {isAdmin && users.length === 0 && (
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mb-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 sm:p-5 mb-6 sm:mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start sm:items-center">
                     <div className="bg-blue-100 p-3 rounded-full mr-4">
                       <Link className="h-6 w-6 text-blue-600" />
                     </div>
                     <div>
-                      <h4 className="text-blue-900 font-bold">Grow your audience!</h4>
+                      <h4 className="text-blue-900 font-bold text-sm sm:text-base">Grow your audience!</h4>
                       <p className="text-blue-700 text-sm">You haven't linked any users yet. Share your link to start sending global alerts.</p>
                     </div>
                   </div>
                   <button 
                     onClick={handleGenerateInvite}
-                    className="whitespace-nowrap px-6 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition shadow-sm"
+                    className="w-full sm:w-auto whitespace-nowrap px-6 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition shadow-sm"
                   >
                      Generate Invite Link
                   </button>
@@ -822,11 +936,36 @@ function App() {
                   )}
                 </div>
                 <span className="text-sm px-3 py-1 bg-blue-50 text-blue-600 rounded-full font-medium">
-                  {tasks.filter(t => !t.completed).length} pending
+                  {filteredTasks.filter(t => !t.completed).length} pending
                 </span>
               </div>
 
-              <div className="mb-8">
+              <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3">
+                <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search tasks..." className="px-3 py-2 border border-gray-300 rounded-md" />
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} className="px-3 py-2 border border-gray-300 rounded-md">
+                  <option value="all">All status</option>
+                  <option value="pending">Pending</option>
+                  <option value="completed">Completed</option>
+                </select>
+                <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)} className="px-3 py-2 border border-gray-300 rounded-md">
+                  <option value="all">All types</option>
+                  <option value="standard">Standard</option>
+                  <option value="poll">Poll</option>
+                </select>
+                <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as any)} className="px-3 py-2 border border-gray-300 rounded-md">
+                  <option value="all">All priorities</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+                <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="px-3 py-2 border border-gray-300 rounded-md">
+                  <option value="dueSoonest">Due soonest</option>
+                  <option value="newest">Newest</option>
+                </select>
+              </div>
+
+              <div className="mb-6 sm:mb-8">
                   <TaskEditor 
                     onSave={handleCreateTaskObj} 
                     isAdmin={isAdmin} 
@@ -837,26 +976,26 @@ function App() {
 
               <div className="space-y-8">
                 {Object.entries(
-                   tasks.reduce((acc, t) => {
+                   filteredTasks.reduce((acc, t) => {
                        const g = t.groupName || 'Ungrouped Tasks';
                        if (!acc[g]) acc[g] = [];
                        acc[g].push(t);
                        return acc;
                    }, {} as Record<string, Task[]>)
                 ).map(([groupString, groupTasks]) => (
-                  <div key={groupString} className="space-y-4">
+                  <div key={groupString} className="space-y-3 sm:space-y-4">
                      <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider pl-2 border-l-4 border-blue-400">{groupString}</h3>
                      
                      {groupTasks.map((task) => (
                       <div
                         key={task.id}
-                        className={`p-4 border rounded-xl shadow-sm transition-all ${
+                        className={`p-3 sm:p-4 border rounded-xl shadow-sm transition-all ${
                           task.completed ? 'bg-green-50/50 border-green-200 opacity-75' : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md'
                         }`}
                       >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="flex items-center space-x-3">
+                        <div className="flex items-start sm:items-center space-x-2 sm:space-x-3">
                            {(task.userId === currentUser.id || isAdmin) && (
                              <button
                                onClick={() => toggleTaskCompletion(task.id)}
@@ -867,8 +1006,17 @@ function App() {
                                <CheckCircle className="h-6 w-6" />
                              </button>
                            )}
-                           <h3 className={`text-lg font-medium ${task.completed ? 'text-green-800 line-through' : 'text-gray-900'}`}>
+                           <h3 className={`text-base sm:text-lg font-medium ${task.completed ? 'text-green-800 line-through' : 'text-gray-900'}`}>
                              {task.title}
+                             {task.priority && task.priority !== 'medium' && (
+                               <span className={`ml-2 text-xs px-2 py-0.5 rounded-full font-bold ${
+                                 task.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                                 task.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                                 'bg-blue-100 text-blue-700'
+                               }`}>
+                                 {task.priority.toUpperCase()}
+                               </span>
+                             )}
                              {task.userId !== currentUser.id && (
                                  <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">From Admin</span>
                              )}
@@ -876,13 +1024,28 @@ function App() {
                         </div>
                         {task.description_html && (
                           <div 
-                             className="text-sm text-gray-600 mt-3 ml-8 sm:ml-11 prose prose-sm max-w-none"
+                             className="text-sm text-gray-600 mt-3 ml-2 sm:ml-11 prose prose-sm max-w-none"
                              dangerouslySetInnerHTML={{__html: task.description_html}}
                           />
                         )}
+                        {task.attachments && task.attachments.length > 0 && (
+                          <div className="ml-2 sm:ml-11 mt-3 space-y-1">
+                            <p className="text-xs font-semibold text-gray-500 uppercase">Attachments</p>
+                            {task.attachments.map((attachment, i) => (
+                              <a key={`${attachment.url}-${i}`} href={attachment.url} target="_blank" rel="noreferrer" className="block text-sm text-blue-600 hover:underline truncate">
+                                {attachment.name}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                        {task.recurrence && (
+                          <div className="ml-2 sm:ml-11 mt-2 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 inline-block px-2 py-1 rounded">
+                            Recurs {task.recurrence.frequency} every {task.recurrence.interval}
+                          </div>
+                        )}
                         
                         {task.type === 'poll' && (
-                           <div className="mt-4 ml-8 sm:ml-11 bg-gray-50 border p-3 rounded-lg max-w-sm">
+                           <div className="mt-4 ml-2 sm:ml-11 bg-gray-50 border p-3 rounded-lg max-w-sm">
                               <h4 className="text-sm font-semibold mb-2">Vote on Option:</h4>
                               {task.pollOptions?.map((opt, idx) => {
                                   const votedHere = task.votes && task.votes[idx] && task.votes[idx].some(v => v.uid === currentUser.id);
@@ -916,7 +1079,7 @@ function App() {
                            </div>
                         )}
                         
-                        <div className="ml-8 sm:ml-11 flex items-center space-x-2 mt-4 flex-wrap gap-y-2">
+                        <div className="ml-2 sm:ml-11 flex items-center space-x-2 mt-4 flex-wrap gap-y-2">
                             {['👍', '❤️', '👀', '🔥', '😢'].map(emoji => {
                                 const reacted = task.reactions && task.reactions[emoji] && task.reactions[emoji].includes(currentUser.id);
                                 const count = task.reactions && task.reactions[emoji] ? task.reactions[emoji].length : 0;
@@ -932,11 +1095,27 @@ function App() {
                             })}
                         </div>
                         
-                        <div className="flex items-center justify-between mt-5 ml-8 sm:ml-11 border-t pt-4 border-gray-100">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-5 ml-2 sm:ml-11 border-t pt-4 border-gray-100">
                           <p className="text-xs text-gray-500 font-medium bg-gray-100/80 inline-block px-2.5 py-1.5 rounded-md flex items-center">
                             Due: {format(task.dueDate, 'MMM dd, yyyy HH:mm')}
                           </p>
-                          <div className="flex items-center space-x-1">
+                          <div className="flex items-center flex-wrap gap-1">
+                            <button
+                              onClick={() => handleSnoozeTask(task.id)}
+                              className="text-gray-400 hover:text-orange-500 transition-colors p-1.5 rounded-md hover:bg-orange-50"
+                              title="Snooze 30 minutes"
+                            >
+                              ⏰
+                            </button>
+                            {task.recurrence && (
+                              <button
+                                onClick={() => handleSkipOccurrence(task.id)}
+                                className="text-gray-400 hover:text-purple-500 transition-colors p-1.5 rounded-md hover:bg-purple-50"
+                                title="Skip this occurrence"
+                              >
+                                ⏭️
+                              </button>
+                            )}
                             <button 
                                 onClick={() => handleToggleMute(task.id)}
                                 className="text-gray-400 hover:text-yellow-500 transition-colors p-1.5 rounded-md hover:bg-yellow-50"
@@ -973,8 +1152,27 @@ function App() {
                                  <Trash2 className="h-5 w-5" />
                                </button>
                             )}
+                            <button
+                              onClick={() => fetchTaskActivity(task.id)}
+                              className="text-gray-400 hover:text-slate-600 transition-colors p-1.5 rounded-md hover:bg-slate-50"
+                              title="Load activity timeline"
+                            >
+                              🕒
+                            </button>
                           </div>
                         </div>
+                        {activityByTask[task.id]?.length ? (
+                          <div className="ml-2 sm:ml-11 mt-3 border-t pt-3">
+                            <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Activity timeline</p>
+                            <div className="space-y-1">
+                              {activityByTask[task.id].slice(0, 5).map((item) => (
+                                <div key={item.id} className="text-xs text-gray-600">
+                                  {item.detail} - {format(new Date(item.created_at), 'MMM dd, HH:mm')}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -982,7 +1180,7 @@ function App() {
                 </div>
                 ))}
                 
-                {tasks.length === 0 && (
+                {filteredTasks.length === 0 && (
                   <div className="text-center py-12 text-gray-400">
                     <Calendar className="h-16 w-16 mx-auto mb-4 opacity-30 text-blue-500" />
                     <p className="text-lg">No tasks yet. Add your first task above!</p>
@@ -991,15 +1189,25 @@ function App() {
               </div>
             </div>
 
-            <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6 ${activeTab !== 'notifications' ? 'hidden lg:block' : ''}`}>
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-3 sm:p-6 ${activeTab !== 'notifications' ? 'hidden lg:block' : ''}`}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-gray-800 flex items-center">
                   <Bell className="h-5 w-5 mr-2 text-yellow-500" />
                   Notifications
                 </h2>
                 <span className="text-sm px-3 py-1 bg-yellow-50 text-yellow-700 rounded-full font-medium">
-                   {notifications.length} total
+                   {notifications.filter(n => !n.isRead).length} unread
                 </span>
+              </div>
+              <div className="flex items-center gap-2 mb-4">
+                <select value={notificationFilter} onChange={(e) => setNotificationFilter(e.target.value as any)} className="px-3 py-2 border border-gray-300 rounded-md text-sm">
+                  <option value="all">All types</option>
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+                <button onClick={() => fetchNotifications()} className="px-3 py-2 text-sm bg-gray-100 rounded-md hover:bg-gray-200">Refresh</button>
+                <button onClick={handleClearNotifications} className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">Mark all read</button>
               </div>
 
               <div className="space-y-4">
@@ -1010,7 +1218,7 @@ function App() {
                       notification.type === 'urgent' ? 'bg-red-50 border-red-200' :
                       notification.type === 'warning' ? 'bg-yellow-50 border-yellow-200' :
                       'bg-blue-50 border-blue-200'
-                    }`}
+                    } ${notification.isRead ? 'opacity-60' : ''}`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -1020,6 +1228,9 @@ function App() {
                           {format(notification.timestamp, 'MMM dd, yyyy HH:mm')}
                         </p>
                       </div>
+                      <button onClick={() => handleMarkNotificationRead(notification.id, !notification.isRead)} className="text-xs px-2 py-1 rounded bg-white border border-gray-200 hover:bg-gray-50">
+                        {notification.isRead ? 'Mark unread' : 'Mark read'}
+                      </button>
                     </div>
                   </div>
                 ))}
