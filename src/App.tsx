@@ -814,6 +814,14 @@ function App() {
                 </>
               )}
               
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-2 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+                title={darkMode ? 'Light Mode' : 'Dark Mode'}
+              >
+                {darkMode ? '☀️' : '🌙'}
+              </button>
+              
               <div className="relative">
                 <div
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
