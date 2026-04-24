@@ -26,6 +26,11 @@ interface Task {
   reactions?: Record<string, string[]>
   recurrence?: { frequency: 'daily' | 'weekly' | 'monthly'; interval: number }
   attachments?: Array<{ url: string; name: string; mimeType: string; size: number }>
+  subtasks?: Array<{ id: string; title: string; completed: boolean }>
+  labels?: string[]
+  assigned_to?: string | null
+  reminder_offset_minutes?: number
+  comments?: Array<{ id: string; text: string; author_id: string; author_name: string; created_at: string }>
 }
 
 interface AppNotification {
@@ -73,8 +78,19 @@ function App() {
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'low' | 'medium' | 'high' | 'urgent'>('all')
   const [sortMode, setSortMode] = useState<'dueSoonest' | 'newest'>('newest')
   const [activityByTask, setActivityByTask] = useState<Record<string, Array<{ id: string; detail: string; created_at: string; actor_id: string; action: string }>>>({})
+  const [labelFilter, setLabelFilter] = useState('')
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('relaysignal_darkmode') === '1')
 
   const processingLogins = useRef(new Set<string>())
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    localStorage.setItem('relaysignal_darkmode', darkMode ? '1' : '0')
+  }, [darkMode])
 
   // Listen to Firebase Auth session — restores login on page refresh automatically
   useEffect(() => {
@@ -316,7 +332,12 @@ function App() {
         reactions: d.reactions || {},
         votes: d.votes || {},
         recurrence: d.recurrence,
-        attachments: d.attachments || []
+        attachments: d.attachments || [],
+        subtasks: d.subtasks || [],
+        labels: d.labels || [],
+        assigned_to: d.assigned_to || null,
+        reminder_offset_minutes: d.reminder_offset_minutes || 0,
+        comments: d.comments || []
       }))
       // Sort nearest first (due_date)
       setTasks(fetchedTasks.sort((a: Task, b: Task) => a.dueDate.getTime() - b.dueDate.getTime()))

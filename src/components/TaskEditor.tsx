@@ -8,11 +8,12 @@ type TaskAttachment = { url: string; name: string; mimeType: string; size: numbe
 interface TaskEditorProps {
   onSave: (task: any) => Promise<void> | void;
   isAdmin: boolean;
+  users?: Array<{ id: string; name: string }>;
   initialTask?: any;
   onCancel?: () => void;
 }
 
-const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, onCancel }) => {
+const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, users, initialTask, onCancel }) => {
   const [title, setTitle] = useState('');
   const [descriptionHtml, setDescriptionHtml] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -33,6 +34,12 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency>('daily');
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
+  const [subtasks, setSubtasks] = useState<Array<{ id: string; title: string; completed: boolean }>>([]);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [labels, setLabels] = useState<string[]>([]);
+  const [newLabel, setNewLabel] = useState('');
+  const [assignedTo, setAssignedTo] = useState<string | null>(null);
+  const [reminderOffset, setReminderOffset] = useState(0);
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
 
@@ -61,6 +68,10 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
         setRecurrenceFrequency(initialTask.recurrence?.frequency || 'daily');
         setRecurrenceInterval(initialTask.recurrence?.interval || 1);
         setPriority(initialTask.priority || 'medium');
+        setSubtasks(initialTask.subtasks || []);
+        setLabels(initialTask.labels || []);
+        setAssignedTo(initialTask.assigned_to || null);
+        setReminderOffset(initialTask.reminder_offset_minutes || 0);
         setAttachments(initialTask.attachments || []);
     } else {
         // Reset if we stop editing
@@ -77,6 +88,11 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
         setRecurrenceFrequency('daily');
         setRecurrenceInterval(1);
         setPriority('medium');
+        setSubtasks([]);
+        setLabels([]);
+        setNewLabel('');
+        setAssignedTo(null);
+        setReminderOffset(0);
         setAttachments([]);
     }
   }, [initialTask]);
@@ -300,6 +316,10 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
           showPollResults: isPoll ? showPollResults : false
           ,
           priority,
+          subtasks,
+          labels,
+          assigned_to: assignedTo || undefined,
+          reminder_offset_minutes: reminderOffset,
           recurrence: recurrenceEnabled ? { frequency: recurrenceFrequency, interval: recurrenceInterval } : undefined,
           attachments
         });
@@ -315,6 +335,11 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
           setRecurrenceFrequency('daily');
           setRecurrenceInterval(1);
           setPriority('medium');
+          setSubtasks([]);
+          setLabels([]);
+          setNewLabel('');
+          setAssignedTo(null);
+          setReminderOffset(0);
           setAttachments([]);
         }
       } catch (err) {
@@ -479,6 +504,79 @@ const TaskEditor: React.FC<TaskEditorProps> = ({ onSave, isAdmin, initialTask, o
               <input type="number" min={1} max={12} value={recurrenceInterval} onChange={(e) => setRecurrenceInterval(Number(e.target.value || 1))} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
             </div>
           )}
+        </div>
+
+        {/* Subtasks */}
+        <div className="border border-gray-200 rounded-md p-3 sm:p-4 bg-gray-50 space-y-3">
+          <p className="font-medium text-gray-700">Subtasks</p>
+          <div className="space-y-2">
+            {subtasks.map((st, i) => (
+              <div key={st.id} className="flex items-center gap-2">
+                <input type="checkbox" checked={st.completed} onChange={() => {
+                  const updated = [...subtasks];
+                  updated[i].completed = !updated[i].completed;
+                  setSubtasks(updated);
+                }} className="mr-1" />
+                <span className={`text-sm flex-1 ${st.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>{st.title}</span>
+                <button type="button" onClick={() => setSubtasks(subtasks.filter((_, idx) => idx !== i))} className="text-red-500 text-xs">✕</button>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <input type="text" placeholder="Add subtask..." value={newSubtaskTitle} onChange={(e) => setNewSubtaskTitle(e.target.value)} className="flex-1 px-3 py-1 border border-gray-300 rounded-md text-sm" />
+              <button type="button" onClick={() => {
+                const t = newSubtaskTitle.trim();
+                if (t) {
+                  setSubtasks([...subtasks, { id: crypto.randomUUID(), title: t, completed: false }]);
+                  setNewSubtaskTitle('');
+                }
+              }} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">+</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Labels */}
+        <div className="border border-gray-200 rounded-md p-3 sm:p-4 bg-gray-50 space-y-3">
+          <p className="font-medium text-gray-700">Labels</p>
+          <div className="flex flex-wrap gap-2">
+            {labels.map((label, i) => (
+              <span key={i} className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs flex items-center gap-1">
+                {label}
+                <button type="button" onClick={() => setLabels(labels.filter((_, idx) => idx !== i))} className="text-blue-500 hover:text-blue-800">✕</button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input type="text" placeholder="Add label..." value={newLabel} onChange={(e) => setNewLabel(e.target.value)} className="flex-1 px-3 py-1 border border-gray-300 rounded-md text-sm" />
+            <button type="button" onClick={() => {
+              const t = newLabel.trim().toLowerCase();
+              if (t && !labels.includes(t) && labels.length < 8) {
+                setLabels([...labels, t]);
+                setNewLabel('');
+              }
+            }} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">+</button>
+          </div>
+        </div>
+
+        {/* Assignment + Reminder */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {isAdmin && users && users.length > 0 && (
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">Assign To</label>
+              <select value={assignedTo || ''} onChange={(e) => setAssignedTo(e.target.value || null)} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">Unassigned</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">Reminder</label>
+            <select value={reminderOffset} onChange={(e) => setReminderOffset(Number(e.target.value))} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value={0}>At due time</option>
+              <option value={15}>15 minutes before</option>
+              <option value={60}>1 hour before</option>
+              <option value={1440}>1 day before</option>
+            </select>
+          </div>
         </div>
 
         <div className="border border-gray-200 rounded-md p-3 sm:p-4 bg-gray-50">

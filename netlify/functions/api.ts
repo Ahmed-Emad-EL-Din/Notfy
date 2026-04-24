@@ -22,6 +22,20 @@ const attachmentSchema = z.object({
   size: z.number().min(1).max(10 * 1024 * 1024)
 })
 
+const subtaskSchema = z.object({
+  id: z.string(),
+  title: z.string().trim().min(1).max(120),
+  completed: z.boolean().default(false)
+})
+
+const commentSchema = z.object({
+  id: z.string(),
+  text: z.string().trim().min(1).max(1000),
+  author_id: z.string(),
+  author_name: z.string(),
+  created_at: z.string()
+})
+
 const taskInputSchema = z.object({
   id: z.string().optional(),
   title: z.string().trim().min(1).max(120),
@@ -39,6 +53,11 @@ const taskInputSchema = z.object({
   showPollResults: z.boolean().optional().default(true),
   recurrence: recurrenceSchema.optional(),
   attachments: z.array(attachmentSchema).max(8).optional().default([]),
+  subtasks: z.array(subtaskSchema).max(20).optional().default([]),
+  labels: z.array(z.string().trim().min(1).max(24)).max(8).optional().default([]),
+  assigned_to: z.string().optional().nullable(),
+  reminder_offset_minutes: z.number().int().min(0).max(10080).optional().default(0),
+  comments: z.array(commentSchema).max(50).optional().default([]),
   user_id: z.string().optional()
 })
 
@@ -770,6 +789,58 @@ export const handler = async (event: any, context: any) => {
       if (!userIsAdmin) throw new Error('Unauthorized')
       const logs = await db.collection('audit_logs').find({}).sort({ created_at: -1 }).limit(200).toArray()
       return { statusCode: 200, headers, body: JSON.stringify(logs) }
+    }
+
+    if (action === 'addComment' && event.httpMethod === 'POST') {
+      const { task_id, text } = body
+      if (!task_id || !text) throw new Error('task_id and text are required')
+      const task = await db.collection('tasks').findOne({ _id: new ObjectId(task_id) })
+      if (!task) throw new Error('Task not found')
+      const ctx = await getUserRoleContext(db, uid!, task)
+      if (ctx.role === 'none') throw new Error('Unauthorized')
+
+      const comment = {
+        id: new ObjectId().toString(),
+        text: sanitizeHtml(text.trim(), { allowedTags: [], allowedAttributes: {} }),
+        author_id: uid,
+        author_name: userRecord?.name || 'User',
+        created_at: new Date().toISOString()
+      }
+      await db.collection('tasks').updateOne(
+        { _id: new ObjectId(task_id) },
+        { $push: { comments: { $each: [comment], $slice: -50 } } } as any
+      )
+      await db.collection('task_activity').insertOne({
+        task_id,
+        actor_id: uid,
+        action: 'commented',
+        detail: `Commented: ${comment.text.substring(0, 60)}${comment.text.length > 60 ? '...' : ''}`,
+        created_at: new Date().toISOString()
+      })
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, comment }) }
+    }
+
+    if (action === 'saveTemplate' && event.httpMethod === 'POST') {
+      const { name, template_data } = body
+      if (!name || !template_data) throw new Error('name and template_data are required')
+      await db.collection('templates').updateOne(
+        { user_id: uid, name: name.trim() },
+        { $set: { user_id: uid, name: name.trim(), template_data, updated_at: new Date().toISOString() } },
+        { upsert: true }
+      )
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
+    }
+
+    if (action === 'getTemplates' && event.httpMethod === 'GET') {
+      const templates = await db.collection('templates').find({ user_id: uid }).sort({ updated_at: -1 }).limit(20).toArray()
+      return { statusCode: 200, headers, body: JSON.stringify(templates) }
+    }
+
+    if (action === 'deleteTemplate' && event.httpMethod === 'DELETE') {
+      const { name } = body
+      if (!name) throw new Error('name is required')
+      await db.collection('templates').deleteOne({ user_id: uid, name: name.trim() })
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true }) }
     }
 
     if (action === 'telegramWebhook' && event.httpMethod === 'POST') {
